@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – Check Me</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <div class="le-header">
+    <h1 class="le-title">CHECK ME</h1>
+    <span class="tx-count" id="check-me-count"></span>
+  </div>
+
+  <section class="check-me-section">
+    <h2 class="section-label" style="margin:20px 0 8px">EXPENSES</h2>
+    <div class="tx-wrap">
+      <table class="tx-table">
+        <thead>
+          <tr>
+            <th style="width:95px">DATE</th>
+            <th class="is-num" style="width:110px">AMOUNT</th>
+            <th style="width:110px">ACCOUNT</th>
+            <th>DESCRIPTION</th>
+            <th style="width:130px">CATEGORY</th>
+            <th style="width:130px">SUBCATEGORY</th>
+            <th style="width:80px"></th>
+          </tr>
+        </thead>
+        <tbody id="check-me-expenses-body">
+          <tr class="tx-empty" id="expenses-empty"><td colspan="7">Nothing to review.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 class="section-label" style="margin:28px 0 8px">INCOME</h2>
+    <div class="tx-wrap">
+      <table class="tx-table">
+        <thead>
+          <tr>
+            <th style="width:95px">DATE</th>
+            <th class="is-num" style="width:110px">AMOUNT</th>
+            <th style="width:110px">ACCOUNT</th>
+            <th>DESCRIPTION</th>
+            <th style="width:160px">INCOME CATEGORY</th>
+            <th style="width:80px"></th>
+          </tr>
+        </thead>
+        <tbody id="check-me-income-body">
+          <tr class="tx-empty" id="income-empty"><td colspan="6">Nothing to review.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/check_me.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

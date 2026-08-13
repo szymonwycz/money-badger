@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+.venv/
+
+# Your data — never committed
+budget.db
+budget.db.bak-*
+*.bak-*
+logs/
+Export/
+Corrections/
+Import/
+Users/
+raw_pulls/
+shots/
+
+# Your configuration — copy the .example files and edit
+.env
+sync/config.json
+sync/rules.json
+sync/custom_hooks.py
+sync/enable_banking.pem
+sync/.bank_sync_state.json
+sync/.allegro_processed.json
+known_issues.json
+
+# Runtime state
+.push_actuals_state.json
+.last_fetch_summary.json
+.self_checker_report.txt

@@ -1,0 +1,11 @@
+[Unit]
+Description=Money Badger - nightly audit of already-fetched data
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{DIR}}
+EnvironmentFile={{DIR}}/.env
+ExecStart={{DIR}}/venv/bin/python3 {{DIR}}/sync/self_checker.py

@@ -1,0 +1,52 @@
+:root {
+
+  /* ==============================
+     COLORS
+     ============================== */
+  --bg:     #1a2535;   /* main background */
+  --bg2:    #1e2d42;   /* secondary background, hover fill */
+  --panel:  #243048;   /* panel / card surface */
+  --border: #2e3d55;   /* borders, dividers */
+  --text:   #ffffff;   /* primary text */
+  --text2:  #8b9ab0;   /* secondary / muted text */
+
+  --yellow: #e8b84b;   /* amounts, accents, budget values */
+  --blue:   #0a84ff;   /* buttons, transfers, focus */
+  --red:    #ff453a;   /* errors, overbudget, negative */
+  --green:  #30d158;   /* income, done, positive balance */
+  --teal:   #2ec4b6;   /* asset accounts (between blue and green) */
+
+  /* ==============================
+     SPACING
+     ============================== */
+  --space-xs:  4px;
+  --space-sm:  8px;
+  --space-md:  12px;
+  --space-lg:  16px;
+  --space-xl:  24px;
+  --space-xxl: 32px;
+
+  /* ==============================
+     BORDER RADIUS
+     ============================== */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ==============================
+     FONT SIZES
+     (hierarchy: xs < sm < base < md < lg < xl)
+     ============================== */
+  --fs-xs:   10px;   /* uppercase labels, column headers */
+  --fs-sm:   11px;   /* badges, secondary labels */
+  --fs-base: 13px;   /* body text, descriptions, table rows */
+  --fs-md:   14px;   /* values, interactive elements */
+  --fs-lg:   16px;   /* summary bar values */
+  --fs-xl:   19px;   /* month navigation label */
+
+  /* ==============================
+     SHADOWS
+     ============================== */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.25);
+}

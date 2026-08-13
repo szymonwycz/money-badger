@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – Large Expenses</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <div class="le-header">
+    <h1 class="le-title">LARGE EXPENSES</h1>
+    <button class="btn btn-yellow" id="btn-add-expense">+ Add</button>
+  </div>
+
+  <div id="le-list"></div>
+
+</div>
+
+<!-- Add expense modal -->
+<div class="modal-overlay" id="expense-modal" style="display:none">
+  <div class="modal modal-small">
+    <div class="modal-header">
+      <h2>Nowy wydatek</h2>
+      <button class="close-btn" id="expense-modal-close">×</button>
+    </div>
+    <input type="text"   id="expense-desc"   placeholder="Opis (np. Drzwi wewnętrzne)" style="width:100%;margin-bottom:10px">
+    <input type="number" id="expense-amount" min="0" step="1" placeholder="Amount"  style="width:100%;margin-bottom:10px">
+    <select id="expense-year" style="width:100%;margin-bottom:10px"></select>
+    <select id="expense-month" style="width:100%;margin-bottom:10px">
+      <option value="">Miesiąc (opcjonalnie)</option>
+      <option value="1">January</option><option value="2">February</option>
+      <option value="3">March</option><option value="4">April</option>
+      <option value="5">May</option><option value="6">June</option>
+      <option value="7">July</option><option value="8">August</option>
+      <option value="9">September</option><option value="10">October</option>
+      <option value="11">November</option><option value="12">December</option>
+    </select>
+    <button class="btn btn-yellow btn-full" id="btn-expense-save">Add</button>
+  </div>
+</div>
+
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/large_expenses.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

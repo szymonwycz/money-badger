@@ -1,0 +1,3 @@
+# Tests. Playwright also needs `playwright install chromium` once.
+pytest>=8.0
+playwright>=1.40

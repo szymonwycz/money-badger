@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – sign in</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+<style>
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+  .login-card { background: var(--bg2); border-radius: 14px; padding: 34px 30px;
+                width: min(360px, 90vw); text-align: center; }
+  .login-card img { width: 96px; margin-bottom: 18px; }
+  .login-card input { width: 100%; padding: 11px 13px; margin: 14px 0 6px;
+                      border-radius: 8px; border: 1px solid var(--line, #2c3e57);
+                      background: var(--bg); color: var(--text, #e8edf5);
+                      font-size: 16px; /* under 16px iOS zooms the whole page on focus */ }
+  .login-card button { width: 100%; margin-top: 12px; }
+  .login-error { color: var(--red, #ff453a); font-size: 14px; min-height: 20px; }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" method="post" autocomplete="on">
+    <img src="/static/badger.png?v={{ v }}" alt="Money Badger">
+    <input type="password" name="password" placeholder="Password"
+           autocomplete="current-password" autofocus required>
+    <div class="login-error">{{ error or '' }}</div>
+    <button type="submit" class="btn btn-blue">Sign in</button>
+  </form>
+</div>
+</body>
+</html>

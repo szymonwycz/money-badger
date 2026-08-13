@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – Transactions</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <div class="summary-bar" id="summary-bar">
+    <div class="sum-block">
+      <span class="sum-label">INCOME</span>
+      <span class="sum-val sum-income" id="sum-income">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block">
+      <span class="sum-label">PLANNED</span>
+      <span class="sum-val" id="sum-planned">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block">
+      <span class="sum-label">SPENT</span>
+      <span class="sum-val" id="sum-spent">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block sum-block-wide" id="sum-narrative">—</div>
+  </div>
+
+  <div class="balance-bar" id="balance-bar-accounts">
+    <span class="balance-bar-label">BALANCE</span>
+    <div id="balance-items-accounts"></div>
+  </div>
+  <div class="balance-bar" id="balance-bar-assets">
+    <span class="balance-bar-label">ASSETS</span>
+    <div id="balance-items-assets"></div>
+  </div>
+
+  <header class="month-nav">
+    <button id="btn-prev">&lt;</button>
+    <span id="month-label"></span>
+    <button id="btn-next">&gt;</button>
+  </header>
+
+  <div class="tx-toolbar">
+    <input type="text"   id="search-desc"   placeholder="DESCRIPTION" class="search-input">
+    <input type="number" id="search-amount" aria-label="Search amount" placeholder="AMOUNT" class="search-input search-amount">
+    <span class="tx-count" id="tx-count"></span>
+  </div>
+
+  <div class="tx-wrap">
+    <table class="tx-table">
+      <thead>
+        <tr>
+          <th style="width:95px">DATE</th>
+          <th class="is-num" style="width:110px">AMOUNT</th>
+          <th style="width:110px">ACCOUNT</th>
+          <th style="width:95px">TYPE</th>
+          <th>DESCRIPTION</th>
+          <th style="width:130px">CATEGORY</th>
+          <th style="width:130px">SUBCATEGORY</th>
+          <th style="width:30px"></th>
+        </tr>
+      </thead>
+      <tbody id="tx-body">
+        <tr id="add-row" class="tx-add-row">
+          <td><input type="date" id="new-date" aria-label="Date" style="width:130px"></td>
+          <td style="white-space:nowrap"><input type="number" id="new-amount" aria-label="Amount" placeholder="0" style="width:85px" min="0" step="0.01"> {{ settings.currency }}</td>
+          <td><select id="new-account" style="width:100px"><option value="">Account</option></select></td>
+          <td>
+            <select id="new-type" aria-label="Type" style="width:95px">
+              <option value="Expense">Expense</option>
+              <option value="Income">Income</option>
+              <option value="Money Transfer">Transfer</option>
+            </select>
+          </td>
+          <td>
+            <div style="display:flex;align-items:center;gap:6px">
+              <select id="new-account-to" aria-label="To account" style="width:110px" hidden><option value="">To account</option></select>
+              <input type="text" id="new-desc" aria-label="Description" placeholder="Description" style="width:160px">
+            </div>
+          </td>
+          <td>
+            <select id="new-cat" style="width:120px"><option value="">Category</option></select>
+            <select id="new-income-cat" aria-label="Income category" style="width:120px" hidden><option value="">Income category</option></select>
+          </td>
+          <td>
+            <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+              <select id="new-subcat" style="width:104px"><option value="">Subcategory</option></select>
+              <button class="add-btn" id="btn-add-tx" title="Add transaction">+</button>
+            </div>
+          </td>
+          <td></td>
+        </tr>
+        <tr id="tx-empty" class="tx-empty" style="display:none">
+          <td colspan="8">No transactions this month.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+<script>
+const INIT_MONTH = {{ month }};
+const INIT_YEAR  = {{ year }};
+</script>
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/transactions.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# Core web app — this is all you need for the BASIC variant.
+Flask>=3.0
+gunicorn>=21.0

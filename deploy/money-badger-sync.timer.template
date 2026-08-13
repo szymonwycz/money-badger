@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the Money Badger sync daily
+
+[Timer]
+OnCalendar=*-*-* {{SYNC_TIME}}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

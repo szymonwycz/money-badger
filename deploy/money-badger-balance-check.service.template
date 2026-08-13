@@ -1,0 +1,11 @@
+[Unit]
+Description=Money Badger - weekly bank balance drift check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{DIR}}/sync
+EnvironmentFile={{DIR}}/.env
+ExecStart={{DIR}}/venv/bin/python3 {{DIR}}/sync/main.py fetch-balances

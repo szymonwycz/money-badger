@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – Expenses</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <!-- Summary bar -->
+  <div class="summary-bar" id="summary-bar">
+    <div class="sum-block">
+      <span class="sum-label">INCOME</span>
+      <span class="sum-val sum-income" id="sum-income">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block">
+      <span class="sum-label">PLANNED</span>
+      <span class="sum-val" id="sum-planned">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block">
+      <span class="sum-label">SPENT</span>
+      <span class="sum-val" id="sum-spent">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block sum-block-wide" id="sum-narrative">—</div>
+  </div>
+
+  <!-- Balance bar — accounts: bank + cash -->
+  <div class="balance-bar" id="balance-bar-accounts">
+    <span class="balance-bar-label">BALANCE</span>
+    <div id="balance-items-accounts"></div>
+    <button class="add-btn" id="btn-add-account" title="Add account">+</button>
+  </div>
+
+  <!-- Balance bar — assets -->
+  <div class="balance-bar" id="balance-bar-assets">
+    <span class="balance-bar-label">ASSETS</span>
+    <div id="balance-items-assets"></div>
+    <button class="add-btn" id="btn-add-account-asset" title="Add asset">+</button>
+  </div>
+
+  <!-- Month navigation -->
+  <header class="month-nav">
+    <button id="btn-prev">&lt;</button>
+    <span id="month-label"></span>
+    <button id="btn-next">&gt;</button>
+  </header>
+
+  <!-- Budget table (full width) -->
+  <main class="budget-main">
+    <div class="cat-toolbar">
+      <button id="btn-expand-all" class="btn btn-yellow">COLLAPSE ALL</button>
+      <button id="btn-edit-categories" class="btn btn-yellow">EDIT CATEGORIES</button>
+    </div>
+    <table class="budget-table">
+      <thead>
+        <tr class="col-headers">
+          <th class="col-cat">CATEGORY</th>
+          <th class="col-basic">BASIC</th>
+          <th class="col-add">ADDITIONAL</th>
+          <th class="col-note">NOTE</th>
+          <th class="col-total">TOTAL</th>
+          <th class="col-spent">SPENT</th>
+          <th class="col-remaining">REMAINING</th>
+        </tr>
+      </thead>
+      <tbody id="budget-tbody"></tbody>
+    </table>
+  </main>
+
+  <div style="margin-top:12px">
+    <button class="btn btn-yellow" id="btn-copy-basic">Copy BASIC for the next month</button>
+    <button class="btn btn-yellow" id="btn-add-top-category" style="display:none">+ Add category</button>
+  </div>
+
+</div>
+
+<!-- Budget modal -->
+<div class="modal-overlay" id="modal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="close-btn" id="modal-close">×</button>
+    </div>
+    <div class="basic-section">
+      <div class="section-label">BASIC — monthly</div>
+      <div class="basic-row">
+        <input type="number" id="basic-amount" min="0" step="1" placeholder="0">
+        <span>{{ settings.currency }}</span>
+        <button class="btn btn-blue" id="btn-save-basic">Save</button>
+      </div>
+    </div>
+    <div class="additional-section">
+      <div class="section-label">ADDITIONAL — this month</div>
+      <div class="additional-list" id="additional-list"></div>
+      <div class="add-additional-row">
+        <input type="number" id="add-amount" min="0" step="1" placeholder="Amount">
+        <input type="text"   id="add-desc"   placeholder="Description (e.g. skimmer)">
+        <button class="btn btn-yellow" id="btn-add-additional">Add</button>
+      </div>
+    </div>
+    <div class="additional-section">
+      <div class="section-label">TRANSACTIONS — this month</div>
+      <div class="additional-list" id="tx-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Account balance modal -->
+<div class="modal-overlay" id="account-modal" style="display:none">
+  <div class="modal modal-small">
+    <div class="modal-header">
+      <h2 id="account-modal-title">Edit balance</h2>
+      <button class="close-btn" id="account-modal-close">×</button>
+    </div>
+    <div class="section-label" style="margin-bottom:8px">NEW BALANCE</div>
+    <div class="basic-row">
+      <input type="number" id="account-balance-input" step="0.01" placeholder="0.00">
+      <span>{{ settings.currency }}</span>
+    </div>
+    <button class="btn btn-blue btn-full" style="margin-top:12px" id="btn-account-save">Save</button>
+    <button class="btn btn-full" style="margin-top:8px;background:var(--red);color:white" id="btn-account-delete">Delete account</button>
+  </div>
+</div>
+
+<!-- Add account modal -->
+<div class="modal-overlay" id="add-account-modal" style="display:none">
+  <div class="modal modal-small">
+    <div class="modal-header">
+      <h2>New account</h2>
+      <button class="close-btn" id="add-account-modal-close">×</button>
+    </div>
+    <input type="text" id="new-account-name" placeholder="Account name" style="width:100%;margin-bottom:10px">
+    <select id="new-account-type" style="width:100%;margin-bottom:10px">
+      <option value="bank">Bank</option>
+      <option value="cash">Cash</option>
+      <option value="asset">Asset / Goal</option>
+    </select>
+    <button class="btn btn-blue btn-full" id="btn-add-account-save">Add</button>
+  </div>
+</div>
+
+<script>
+const INIT_MONTH = {{ month }};
+const INIT_YEAR  = {{ year }};
+</script>
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/app.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

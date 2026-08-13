@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1a2535">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Money Badger</title>
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/design_tokens.css?v={{ v }}">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex; flex-direction: column;
+}
+.m-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.m-header img { width: 34px; height: 34px; object-fit: contain; }
+.m-header h1 { font-size: 15px; letter-spacing: 2px; font-weight: 700; }
+.m-header .m-desktop-link {
+  margin-left: auto; color: var(--text2); font-size: 12px; text-decoration: none;
+  border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
+}
+.m-queue-badge {
+  margin-left: auto; color: #1a2535; background: var(--yellow); font-size: 11px; font-weight: 700;
+  border-radius: 6px; padding: 4px 8px; letter-spacing: 0.5px;
+}
+.m-queue-badge ~ .m-desktop-link { margin-left: 8px; }
+.m-content { flex: 1; overflow-y: auto; padding: 16px; padding-bottom: 90px; }
+.m-panel { display: none; }
+.m-panel.active { display: block; }
+
+/* ── bottom tab bar ── */
+.m-tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  display: flex; background: var(--panel); border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.m-tab {
+  flex: 1; padding: 12px 0 10px; text-align: center;
+  background: none; border: none; border-top: 2px solid transparent;
+  color: var(--text2); font-size: 11px; letter-spacing: 1px; font-weight: 600;
+}
+.m-tab .m-tab-ico { display: block; font-size: 20px; margin-bottom: 2px; }
+.m-tab.active { color: var(--text); border-top-color: var(--yellow); }
+
+/* ── ADD tab ── */
+.m-type-toggle {
+  display: flex; gap: 8px; margin-top: 14px;
+}
+.m-type-toggle button {
+  flex: 1; padding: 10px 0; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text2); font-size: 12px; font-weight: 700; letter-spacing: 1px;
+}
+.m-type-toggle button.active { border-color: var(--yellow); color: var(--text); border-top: 2px solid var(--yellow); }
+.m-amount-row { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 22px; }
+.m-amount-row input {
+  flex: 1; background: transparent; border: none; border-bottom: 2px solid var(--border);
+  color: var(--yellow); font-size: 44px; font-weight: 700; text-align: right;
+  padding: 4px 8px; min-width: 0; outline: none;
+}
+.m-amount-row input:focus { border-bottom-color: var(--yellow); }
+.m-amount-row span { font-size: 26px; color: var(--text2); }
+.m-field { margin-bottom: 14px; }
+.m-field label {
+  display: block; font-size: 11px; letter-spacing: 1px; color: var(--text2); margin-bottom: 6px;
+}
+.m-field select, .m-field input {
+  width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 17px; padding: 13px 12px; appearance: none; outline: none;
+}
+.m-add-btn {
+  width: 100%; margin-top: 10px; padding: 16px;
+  background: var(--yellow); color: #1a2535; border: none; border-radius: 12px;
+  font-size: 17px; font-weight: 700; letter-spacing: 1px;
+}
+.m-add-btn:disabled { opacity: 0.5; }
+.m-add-status { text-align: center; margin-top: 12px; min-height: 22px; font-size: 15px; }
+
+/* ── BALANCES tab ── */
+.m-bal-section { margin-bottom: 20px; }
+.m-bal-title { font-size: 11px; letter-spacing: 1px; color: var(--text2); margin-bottom: 8px; }
+.m-bal-row {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 13px 14px; margin-bottom: 8px; font-size: 16px;
+}
+.m-bal-row .val { font-weight: 700; }
+.m-bal-total { display: flex; justify-content: space-between; padding: 6px 14px 0; color: var(--text2); font-size: 13px; }
+
+/* ── BUDGET tab ── */
+.m-month-nav { display: flex; justify-content: center; align-items: center; gap: 18px; margin-bottom: 14px; }
+.m-month-nav button {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 17px; padding: 6px 16px;
+}
+.m-month-nav span { font-size: 14px; font-weight: 700; letter-spacing: 1px; min-width: 130px; text-align: center; }
+.m-sum { display: flex; justify-content: space-between; margin-bottom: 14px; }
+.m-sum .cell { text-align: center; flex: 1; }
+.m-sum .lbl { font-size: 10px; letter-spacing: 1px; color: var(--text2); display: block; }
+/* was white-space:nowrap — four cells of "123 456 zł" clipped instead of wrapping */
+.m-sum .num { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.m-cat {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 14px; margin-bottom: 8px; cursor: pointer;
+}
+.m-cat-top { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; }
+.m-cat-top .rem { font-weight: 700; white-space: nowrap; flex-shrink: 0; margin-left: 10px; }
+.m-cat-top > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-cat-bar { height: 4px; background: var(--bg2); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.m-cat-fill { height: 100%; background: var(--green); border-radius: 2px; }
+.m-cat-fill.over { background: var(--red); }
+.m-cat-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.m-cat-children { margin-top: 8px; display: none; }
+.m-cat.expanded .m-cat-children { display: block; }
+.m-cat-child { display: flex; justify-content: space-between; gap: 10px; font-size: 13px;
+  padding: 12px 0 12px 10px; min-height: 44px; align-items: center;
+  color: var(--text2); cursor: pointer; }
+.m-cat-child > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-cat-child .rem { white-space: nowrap; flex-shrink: 0; }
+.m-cat-child:active { opacity: 0.6; }
+
+/* ── CHECK ME tab ── */
+.m-tab { position: relative; }
+.m-tab-badge {
+  position: absolute; top: 4px; right: 50%; transform: translateX(22px);
+  background: var(--red); color: #fff; font-size: 10px; font-weight: 700;
+  min-width: 17px; height: 17px; line-height: 17px; border-radius: 9px; padding: 0 4px;
+}
+.m-check-head { font-size: 12px; color: var(--text2); margin-bottom: 12px; text-align: center; }
+.m-check-item {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 10px;
+}
+.m-check-top { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; }
+.m-check-top .amount { font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+.m-check-desc { font-size: 13px; color: var(--text2); margin: 6px 0 10px; overflow-wrap: anywhere; }
+.m-check-item select {
+  width: 100%; min-height: 44px; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); font-size: 15px; padding: 0 12px; appearance: none;
+}
+.m-check-actions { display: flex; gap: 8px; margin-top: 8px; }
+.m-check-actions button {
+  flex: 1; min-height: 44px; background: none; border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text2); font-size: 13px; font-weight: 600;
+}
+
+/* ── TRANSACTIONS tab ── */
+.m-tx-search { margin-bottom: 10px; }
+.m-tx-search input {
+  width: 100%; box-sizing: border-box; min-height: 44px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  color: var(--text); font-size: 15px; padding: 0 14px;
+}
+.m-tx-search input::placeholder { color: var(--text2); }
+.m-tx-count { font-size: 12px; color: var(--text2); margin: -4px 0 10px; text-align: center; }
+.m-tx-filter {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 12px; color: var(--text2); margin: -6px 0 14px;
+}
+.m-tx-filter button {
+  background: none; border: none; color: var(--text2); font-size: 14px;
+  min-width: 44px; min-height: 44px;   /* was ~17px — unhittable with a thumb */
+}
+.m-tx-row {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 8px; font-size: 14px;
+}
+.m-tx-row .date { color: var(--text2); font-size: 12px; width: 52px; flex-shrink: 0; }
+.m-tx-row .amount { font-weight: 700; white-space: nowrap; }
+.m-tx-row .acct { margin-left: auto; color: var(--text2); font-size: 12px; text-align: right;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
+.m-tx-empty { color: var(--text2); text-align: center; padding: 30px 0; font-size: 14px; }
+
+/* ── transaction detail (in-flow panel — fixed overlays misalign tap targets
+      on iOS once the keyboard opens, so this behaves like any other tab) ── */
+.m-tx-detail { display: none; }
+.m-tx-detail.open { display: block; }
+.m-tx-detail-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+}
+.m-tx-detail-header button.back {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-size: 16px; padding: 6px 14px;
+}
+.m-tx-detail-header .title { font-size: 13px; letter-spacing: 1px; font-weight: 700; }
+.m-tx-detail-header .status { margin-left: auto; font-size: 13px; color: var(--green); }
+.m-tx-type-badge {
+  display: inline-block; font-size: 11px; letter-spacing: 1px; color: var(--text2);
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; margin-bottom: 14px;
+}
+.m-del-btn {
+  width: 100%; margin-top: 18px; padding: 14px;
+  background: transparent; color: var(--red); border: 1px solid var(--red); border-radius: 12px;
+  font-size: 15px; font-weight: 700; letter-spacing: 1px;
+}
+</style>
+</head>
+<body>
+<header class="m-header">
+  <img src="/static/badger.png?v={{ v }}" alt="Money Badger">
+  <h1>MONEY BADGER</h1>
+  <span id="m-queue-badge" class="m-queue-badge" style="display:none"></span>
+  <a class="m-desktop-link" href="/">FULL VERSION</a>
+</header>
+
+<main class="m-content">
+
+  <!-- ADD EXPENSE / TRANSFER -->
+  <section class="m-panel active" id="panel-add">
+    <div class="m-type-toggle">
+      <button class="active" id="m-type-expense">EXPENSE</button>
+      <button id="m-type-income">INCOME</button>
+      <button id="m-type-transfer">TRANSFER</button>
+    </div>
+    <div class="m-amount-row">
+      <input type="text" inputmode="decimal" id="m-amount" placeholder="0" autocomplete="off">
+      <span>{{ settings.currency }}</span>
+    </div>
+    <div class="m-field" id="m-category-field">
+      <label>CATEGORY</label>
+      <select id="m-category"><option value="">—</option></select>
+    </div>
+    <div class="m-field" id="m-income-category-field" style="display:none">
+      <label>INCOME CATEGORY</label>
+      <select id="m-income-category"><option value="">—</option></select>
+    </div>
+    <div class="m-field">
+      <label id="m-account-label">ACCOUNT</label>
+      <select id="m-account"></select>
+    </div>
+    <div class="m-field" id="m-account-to-field" style="display:none">
+      <label>TO ACCOUNT</label>
+      <select id="m-account-to"></select>
+    </div>
+    <div class="m-field">
+      <label>DESCRIPTION (optional)</label>
+      <input type="text" id="m-desc" placeholder="—">
+    </div>
+    <div class="m-field">
+      <label>DATE</label>
+      <input type="date" id="m-date">
+    </div>
+    <button class="m-add-btn" id="m-add-btn">ADD EXPENSE</button>
+    <div class="m-add-status" id="m-add-status"></div>
+  </section>
+
+  <!-- BALANCES -->
+  <section class="m-panel" id="panel-balances">
+    <div class="m-bal-section">
+      <div class="m-bal-title">ACCOUNTS</div>
+      <div id="m-bal-accounts"></div>
+      <div class="m-bal-total"><span>TOTAL</span><span id="m-bal-accounts-total"></span></div>
+    </div>
+    <div class="m-bal-section">
+      <div class="m-bal-title">ASSETS</div>
+      <div id="m-bal-assets"></div>
+      <div class="m-bal-total"><span>TOTAL</span><span id="m-bal-assets-total"></span></div>
+    </div>
+  </section>
+
+  <!-- TRANSACTIONS -->
+  <section class="m-panel" id="panel-txns">
+    <div class="m-month-nav">
+      <button id="m-tx-prev">‹</button>
+      <span id="m-tx-month-label"></span>
+      <button id="m-tx-next">›</button>
+    </div>
+    <div class="m-tx-filter" id="m-tx-filter" style="display:none">
+      Filtered: <span id="m-tx-filter-name"></span>
+      <button id="m-tx-filter-clear" aria-label="Clear category filter">✕</button>
+    </div>
+    <div class="m-tx-search">
+      <input type="search" id="m-tx-search" inputmode="search"
+             aria-label="Search transactions by description or amount"
+             placeholder="Search description or amount">
+    </div>
+    <div class="m-tx-count" id="m-tx-count"></div>
+    <div id="m-tx-list"></div>
+  </section>
+
+  <!-- Transaction detail (swapped in place of the TXNS list) -->
+  <section class="m-tx-detail" id="m-tx-detail">
+    <div class="m-tx-detail-header">
+      <button class="back" id="m-tx-back">‹ Back</button>
+      <span class="title">TRANSACTION</span>
+      <span class="status" id="m-tx-status"></span>
+    </div>
+    <span class="m-tx-type-badge" id="m-tx-type"></span>
+    <div class="m-field">
+      <label>DATE</label>
+      <input type="date" id="m-tx-date">
+    </div>
+    <div class="m-field">
+      <label>AMOUNT</label>
+      <input type="text" inputmode="decimal" id="m-tx-amount">
+    </div>
+    <div class="m-field">
+      <label>ACCOUNT</label>
+      <select id="m-tx-account"></select>
+    </div>
+    <div class="m-field">
+      <label>DESCRIPTION</label>
+      <input type="text" id="m-tx-desc" placeholder="—">
+    </div>
+    <div class="m-field" id="m-tx-cat-field">
+      <label>CATEGORY</label>
+      <select id="m-tx-cat"></select>
+    </div>
+    <div class="m-field" id="m-tx-subcat-field">
+      <label>SUBCATEGORY</label>
+      <select id="m-tx-subcat"></select>
+    </div>
+    <div class="m-field" id="m-tx-inccat-field" style="display:none">
+      <label>INCOME CATEGORY</label>
+      <select id="m-tx-inccat"></select>
+    </div>
+    <button class="m-del-btn" id="m-tx-delete">DELETE TRANSACTION</button>
+  </section>
+
+  <!-- BUDGET -->
+  <section class="m-panel" id="panel-budget">
+    <div class="m-month-nav">
+      <button id="m-prev">‹</button>
+      <span id="m-month-label"></span>
+      <button id="m-next">›</button>
+    </div>
+    <div class="m-sum">
+      <div class="cell"><span class="lbl">INCOME</span><span class="num" id="m-sum-income">—</span></div>
+      <div class="cell"><span class="lbl">PLANNED</span><span class="num" id="m-sum-planned">—</span></div>
+      <div class="cell"><span class="lbl">SPENT</span><span class="num" id="m-sum-spent">—</span></div>
+      <div class="cell"><span class="lbl">LEFT</span><span class="num" id="m-sum-left">—</span></div>
+    </div>
+    <div id="m-cat-list"></div>
+  </section>
+
+  <section class="m-panel" id="panel-check">
+    <div class="m-check-head">
+      <span id="m-check-count">—</span>
+    </div>
+    <div id="m-check-list"></div>
+  </section>
+
+</main>
+
+<nav class="m-tabbar">
+  <button class="m-tab active" data-panel="panel-add"><span class="m-tab-ico">＋</span>ADD</button>
+  <button class="m-tab" data-panel="panel-balances"><span class="m-tab-ico">◉</span>BALANCES</button>
+  <button class="m-tab" data-panel="panel-txns"><span class="m-tab-ico">≡</span>TXNS</button>
+  <button class="m-tab" data-panel="panel-budget"><span class="m-tab-ico">▤</span>BUDGET</button>
+  <button class="m-tab" data-panel="panel-check"><span class="m-tab-ico">◆</span>CHECK<span class="m-tab-badge" id="m-check-badge" style="display:none">0</span></button>
+</nav>
+
+<script>
+const INIT_MONTH = {{ month }};
+const INIT_YEAR  = {{ year }};
+</script>
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/mobile.js?v={{ v }}"></script>
+</body>
+</html>

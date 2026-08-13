@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<title>Money Badger – Overview</title>
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+<style>
+.ov-chart-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+                 padding: 16px; margin-bottom: 20px; overflow-x: auto; }
+.ov-legend { display: flex; gap: 18px; margin-bottom: 10px; font-size: 12px; color: var(--text2); }
+.ov-legend .chip { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+.ov-legend .chip.line { height: 3px; border-radius: 2px; vertical-align: middle; }
+.ov-tooltip { position: fixed; display: none; background: var(--bg2); border: 1px solid var(--border);
+              border-radius: 8px; padding: 8px 10px; font-size: 12px; pointer-events: none; z-index: 50;
+              box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.ov-tooltip .tt-title { font-weight: 700; margin-bottom: 4px; }
+.ov-tooltip .tt-row { display: flex; justify-content: space-between; gap: 14px; color: var(--text2); }
+.ov-tooltip .tt-row b { color: var(--text); font-weight: 600; }
+.ov-table-wrap { overflow-x: auto; }
+.ov-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ov-table th { color: var(--text2); font-weight: 600; text-align: right; padding: 6px 8px;
+               border-bottom: 1px solid var(--border); letter-spacing: 0.5px; }
+.ov-table th:first-child, .ov-table td:first-child { text-align: left; }
+.ov-table td { text-align: right; padding: 6px 8px; white-space: nowrap; }
+.ov-table tr:hover td { background: var(--bg2); }
+.ov-table .tot { font-weight: 700; border-left: 1px solid var(--border); }
+.ov-section-title { font-size: 13px; letter-spacing: 1px; color: var(--text2); margin: 18px 0 10px; }
+.ov-toolbar { display: flex; gap: 10px; margin: 12px 0 18px; align-items: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <header class="month-nav">
+    <button id="btn-prev">&lt;</button>
+    <span id="year-label"></span>
+    <button id="btn-next">&gt;</button>
+  </header>
+
+  <div class="ov-chart-wrap">
+    <div class="ov-legend">
+      <span><span class="chip" style="background:var(--blue)"></span>PLANNED</span>
+      <span><span class="chip" style="background:var(--yellow)"></span>SPENT</span>
+      <span><span class="chip line" style="background:var(--green)"></span>INCOME (received)</span>
+    </div>
+    <div id="ov-chart"></div>
+  </div>
+
+  <div class="ov-section-title">SPENDING BY CATEGORY — MONTH BY MONTH</div>
+  <div class="ov-table-wrap">
+    <table class="ov-table" id="ov-table"></table>
+  </div>
+
+  <div class="ov-toolbar">
+    <button class="btn btn-yellow" id="btn-export-tx">Export transactions CSV</button>
+    <button class="btn btn-yellow" id="btn-export-budget">Export budget CSV</button>
+  </div>
+</div>
+
+<div class="ov-tooltip" id="ov-tooltip"></div>
+
+<script>
+const INIT_YEAR = {{ year }};
+</script>
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/overview.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

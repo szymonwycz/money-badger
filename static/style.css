@@ -1,0 +1,893 @@
+@import url('./design_tokens.css');
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  min-height: 100vh;
+  font-size: var(--fs-md);
+}
+
+.app { max-width: 1200px; margin: 0 auto; padding: 0 var(--space-lg) 60px; position: relative; }
+
+.app-logo {
+  position: absolute;
+  top: 4px;
+  right: var(--space-lg);
+  width: 90px;
+  height: 90px;
+  object-fit: contain;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* ==========================================
+   TOPNAV
+   ========================================== */
+.topnav {
+  display: flex;
+  gap: var(--space-xs);
+  padding: var(--space-md) 0 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+  overflow-x: auto;
+  scrollbar-width: none;          /* the tabs scroll, the page does not */
+  -webkit-overflow-scrolling: touch;
+}
+.topnav::-webkit-scrollbar { display: none; }
+.nav-link { flex: 0 0 auto; }
+.nav-link {
+  color: var(--text2);
+  text-decoration: none;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: var(--space-sm) 14px 8px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  transition: color 0.15s, border-top-color 0.15s;
+}
+.nav-link:hover { color: var(--text); }
+.nav-link.active {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border);
+  /* SIGNATURE: yellow top edge on active tab — the one consistent mark
+     across every page that says "you are here" in Home Badger's language */
+  border-top-color: var(--yellow);
+  border-top-width: 2px;
+  padding-top: 7px; /* compensate for 2px top border vs 1px elsewhere */
+}
+.nav-link.alert {
+  background: var(--yellow);
+  color: #1a2535;
+  border-color: var(--yellow);
+}
+.nav-link.alert:hover { color: #1a2535; opacity: 0.85; }
+
+/* ==========================================
+   SUMMARY BAR
+   ========================================== */
+.summary-bar {
+  display: flex;
+  align-items: center;
+  /* No wrap meant the narrative ("SHORT 1 234 zł to cover expenses") pushed the bar
+     past the viewport on a phone and the whole page scrolled sideways. */
+  flex-wrap: wrap;
+  row-gap: var(--space-sm);
+  gap: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  padding: var(--space-sm) 20px;
+  margin-bottom: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+}
+.sum-block { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--space-lg); min-width: 0; }
+.sum-block-wide { flex: 1 1 200px; }   /* wraps to its own line instead of squeezing to 3 chars */
+.sum-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.8px; color: var(--text2); }
+.sum-val   { font-size: var(--fs-lg); font-weight: 600; color: var(--yellow); }
+.sum-income { color: var(--green); }
+.sum-divider { width: 1px; background: var(--border); align-self: stretch; }
+#sum-narrative { font-size: var(--fs-base); color: var(--text2); padding-left: 20px; }
+
+/* ==========================================
+   MONTH NAV
+   ========================================== */
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 14px 0 var(--space-md);
+}
+.month-nav button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px var(--space-lg);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--fs-md);
+  transition: background 0.15s;
+}
+.month-nav button:hover { background: var(--border); }
+#month-label {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  min-width: 210px;
+  text-align: center;
+}
+
+/* ==========================================
+   BALANCE BAR
+   Accounts (bank/cash) → --green
+   Assets              → --teal
+   ========================================== */
+.balance-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-sm) 14px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  box-shadow: var(--shadow-sm);
+}
+.balance-bar-label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  white-space: nowrap;
+  padding-right: var(--space-sm);
+  border-right: 1px solid var(--border);
+}
+#balance-items-accounts,
+#balance-items-assets {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0;
+}
+.balance-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 14px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+  border-radius: var(--radius-sm);
+}
+.balance-item:hover { background: var(--border); }
+.balance-item:last-child { border-right: none; }
+.balance-name { font-size: var(--fs-sm); color: var(--text2); }
+.balance-val  { font-size: var(--fs-md); font-weight: 600; color: var(--green); }
+/* Use .balance-val-teal for asset account items */
+.balance-val-teal { color: var(--teal); }
+
+/* ==========================================
+   CAT TABLE (Budget — EXPENSES / INCOME)
+   ========================================== */
+.budget-main { overflow-x: auto; }
+
+.budget-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.budget-table thead th {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  padding: 6px 10px 8px;
+  text-align: right;
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 5;
+  white-space: nowrap;
+}
+.budget-table thead th.col-cat { text-align: left; }
+
+/* Column widths — tighter per design spec */
+.col-cat       { width: auto; min-width: 160px; }
+.col-basic     { width: 90px; }
+.col-add       { width: 100px; }
+.col-note      { width: 160px; text-align: left !important; }
+.col-total     { width: 105px; }
+
+/* INCOME table: planned/received show an editable number input + "zł", needs more room than EXPENSES's plain text cells */
+#income-table .col-basic,
+#income-table .col-add { width: 125px; }
+.col-spent     { width: 90px; }
+.col-remaining { width: 90px; }
+
+/* EXPAND-ALL button above budget table */
+.cat-toolbar {
+  padding: 6px 0 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cat-edit-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  cursor: pointer;
+  font-size: var(--fs-base);
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  margin-left: 8px;
+}
+.cat-edit-btn:hover { color: var(--text); border-color: var(--text2); }
+.cat-edit-btn.cat-remove-btn:hover { color: var(--red); border-color: var(--red); }
+
+/* Group row */
+.group-row td {
+  padding: var(--space-sm) 10px 6px;
+  background: var(--panel);
+  border-radius: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.group-row td:first-child {
+  border-radius: var(--radius-md) 0 0 0;
+  padding-left: var(--space-md);
+}
+.group-row td:last-child { border-radius: 0 var(--radius-md) 0 0; }
+.group-row:hover td { background: var(--border); }
+
+.group-name-cell {
+  font-weight: 700;
+  font-size: var(--fs-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+/* EXPAND-ARROW: only visible when group has children (toggle class applied by JS) */
+.toggle { color: var(--text2); font-size: var(--fs-xs); width: 12px; }
+
+/* Group totals */
+.group-total { color: var(--yellow); font-weight: 700; text-align: right; white-space: nowrap; }
+.group-spent { color: var(--text2);  font-weight: 600; text-align: right; white-space: nowrap; }
+.group-spent.over { color: var(--red); }
+
+/* Separator row after group header */
+.group-sep td { height: 2px; background: var(--bg); padding: 0; }
+
+/* Leaf row */
+.leaf-row td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(46,61,85,0.5);
+  vertical-align: top;
+}
+.leaf-row td:first-child { padding-left: 28px; }
+.leaf-row:hover td { background: var(--bg2); cursor: pointer; }
+
+.leaf-name {
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--fs-base);
+}
+
+.basic-val { text-align: right; color: var(--text2); font-size: var(--fs-base); white-space: nowrap; }
+.add-val   { text-align: right; color: var(--yellow); font-size: var(--fs-base); font-weight: 600; white-space: nowrap; }
+.note-val  { color: var(--text2); font-size: 12px; padding-left: var(--space-sm) !important; }
+.total-val { text-align: right; color: var(--text); font-size: var(--fs-base); font-weight: 600; white-space: nowrap; }
+.spent-val { text-align: right; color: var(--green); font-size: var(--fs-base); white-space: nowrap; }
+.spent-val.over { color: var(--red); font-weight: 700; }
+
+/* REMAINING column: what's left to spend from the planned budget (never negative) */
+.remaining-val { text-align: right; font-size: var(--fs-base); color: var(--green); white-space: nowrap; }
+
+/* Extra additional rows (2nd, 3rd entry per category) */
+
+/* Group spacer */
+.group-spacer td { height: var(--space-sm); }
+
+/* Leaf group (top-level with no children, e.g. standalone income category) */
+.leaf-group-row td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(46,61,85,0.5);
+}
+.leaf-group-row:hover td { background: var(--bg2); cursor: pointer; }
+.leaf-group-name {
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--fs-base);
+  white-space: nowrap;
+}
+
+/* Income table row hover */
+#income-tbody tr:hover td {
+  background: var(--bg2);
+}
+
+/* ==========================================
+   RIGHT PANEL
+   ========================================== */
+
+.add-btn {
+  background: var(--blue);
+  border: none;
+  color: white;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: opacity 0.15s;
+}
+.add-btn:hover { opacity: 0.8; }
+
+/* ==========================================
+   LARGE EXPENSE ITEMS (right panel on budget page)
+   ========================================== */
+
+.expense-cb { cursor: pointer; accent-color: var(--blue); margin-top: 2px; }
+
+.expense-item.done .expense-desc { text-decoration: line-through; color: var(--text2); }
+
+.expense-item.done .expense-amount { color: var(--green); }
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+  align-self: start;
+}
+.icon-btn:hover { color: var(--red); }
+
+.expenses-empty { color: var(--text2); font-size: var(--fs-base); padding: var(--space-sm) 0; }
+
+/* ==========================================
+   MODALS
+   ========================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: var(--space-lg);
+}
+.modal {
+  background: var(--panel);
+  border-radius: var(--radius-xl);
+  padding: 22px;
+  width: 100%;
+  max-width: 460px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-small { max-width: 300px; }
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.modal-header h2 { font-size: var(--fs-lg); font-weight: 700; }
+.close-btn {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+.close-btn:hover { color: var(--text); }
+
+.section-label {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  margin-bottom: var(--space-sm);
+}
+.basic-section { margin-bottom: 22px; }
+.basic-row { display: flex; align-items: center; gap: var(--space-sm); }
+.basic-row span { color: var(--text2); font-size: var(--fs-md); }
+
+input[type="number"], input[type="text"], select {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-md);
+  outline: none;
+  transition: border-color 0.15s;
+}
+input[type="number"]:focus,
+input[type="text"]:focus,
+select:focus { border-color: var(--blue); }
+
+/* Visible focus ring for keyboard users on every interactive element.
+   :focus-visible keeps it off for mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.btn:focus-visible, .icon-btn:focus-visible, .add-btn:focus-visible,
+.nav-link:focus-visible, .close-btn:focus-visible,
+tr[tabindex]:focus-visible, div[tabindex]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+#basic-amount { width: 110px; }
+
+.btn {
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  transition: opacity 0.15s;
+}
+.btn:hover { opacity: 0.85; }
+/* white on --blue is 3.65:1, below AA for normal text; bold reaches the
+   large/bold threshold of 3:1 */
+.btn-blue   { background: var(--blue);   color: white; font-weight: 700; }
+.btn-yellow { background: var(--yellow); color: #1a2535; }
+.btn-full   { width: 100%; margin-top: var(--space-sm); }
+
+.btn-ignore {
+  padding: 4px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.btn-ignore:hover { background: var(--border); }
+
+.additional-list { margin-bottom: var(--space-md); }
+.additional-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.additional-item:last-child { border-bottom: none; }
+.add-item-amount { color: var(--yellow); font-weight: 600; min-width: 80px; }
+.add-item-desc   { flex: 1; color: var(--text2); font-size: var(--fs-base); }
+
+.add-additional-row { display: flex; gap: var(--space-sm); flex-wrap: wrap; }
+#add-amount { width: 100px; }
+#add-desc   { flex: 1; min-width: 120px; }
+
+#expense-desc, #expense-amount, #expense-month { width: 100%; margin-bottom: var(--space-sm); }
+
+/* ==========================================
+   TRANSACTIONS PAGE (TX-TABLE)
+   ========================================== */
+.tx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.search-input  { flex: 1; min-width: 180px; }
+.search-amount { flex: 0 0 130px; }
+.tx-count { color: var(--text2); font-size: 12px; white-space: nowrap; }
+
+.tx-wrap { overflow-x: auto; }
+
+.tx-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-base);
+}
+.tx-table th {
+  text-align: left;
+  /* .is-num on both th and td keeps a money column aligned end to end */
+  color: var(--text2);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.8px;   /* fixed: was 0.6px, now consistent with all uppercase labels */
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  white-space: nowrap;
+}
+.tx-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(46,61,85,0.4);
+  vertical-align: middle;
+}
+.tx-table tbody tr:hover { background: var(--bg2); }
+.tx-table th.is-num, .tx-table td.is-num { text-align: right; }
+
+.tx-date   { color: var(--text2); white-space: nowrap; font-size: var(--fs-base); }
+.tx-amount { color: var(--yellow); white-space: nowrap; font-weight: 600; text-align: right; }
+.tx-acct   { color: var(--text2); white-space: nowrap; }
+/* OPIS: wraps long descriptions, does not truncate */
+.tx-desc   { max-width: 280px; word-wrap: break-word; font-size: var(--fs-base); }
+/* KATEGORIA: nowrap, muted */
+/* PODKATEGORIA: truncates with ellipsis, does not wrap */
+
+.tx-table select {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text2);
+  font-size: var(--fs-base);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  max-width: 140px;
+}
+.tx-table select:hover,
+.tx-table select:focus {
+  border-color: var(--border);
+  background: var(--bg2);
+  color: var(--text);
+}
+
+.tx-empty { color: var(--text2); font-size: var(--fs-md); padding: 20px 0; }
+
+/* ADD-ROW — sticky input row at top of tx-body */
+.tx-add-row td {
+  padding: 6px 6px;
+  border-bottom: 2px solid var(--yellow);
+  background: var(--bg2);
+}
+.tx-add-row input,
+.tx-add-row select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  padding: 3px 6px;
+}
+.tx-add-row input:focus,
+.tx-add-row select:focus {
+  border-color: var(--blue);
+  outline: none;
+}
+
+/* Transfer rows */
+.tx-transfer td { color: var(--text2); font-style: italic; }
+.tx-transfer .tx-amount { color: var(--blue); }
+
+/* ==========================================
+   LARGE EXPENSES PAGE (LE-ITEM)
+   ========================================== */
+.le-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 0 14px;
+}
+.le-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text2);
+}
+
+.le-year-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+  box-shadow: var(--shadow-sm);
+}
+.le-year-header:hover { background: var(--border); }
+
+.le-year-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+.le-toggle     { color: var(--text2); font-size: var(--fs-sm); width: 12px; }
+.le-year-label { font-size: 18px; font-weight: 700; letter-spacing: 1px; }
+
+.le-year-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.le-spent { font-size: 15px; font-weight: 700; color: var(--green); }
+.le-sep   { color: var(--text2); font-size: 15px; }
+.le-total { font-size: 15px; font-weight: 700; color: var(--yellow); }
+
+.le-progress-bar {
+  width: 80px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-left: var(--space-md);
+}
+.le-progress-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+.le-items {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  margin-top: -6px;
+  margin-bottom: var(--space-sm);
+  overflow: hidden;
+}
+
+.le-item {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto auto auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 18px;
+  border-bottom: 1px solid var(--border);
+}
+.le-item:last-child { border-bottom: none; }
+.le-item:hover      { background: var(--panel); }
+
+/* LE-ITEM-DESC: same weight/color as leaf-row (not bold) */
+.le-item-desc {
+  font-size: var(--fs-base);
+  font-weight: 400;
+  color: var(--text);
+}
+/* done: strikethrough + muted */
+.le-item.done .le-item-desc { text-decoration: line-through; color: var(--text2); }
+/* done amount: flip to green (expense completed = money committed) */
+.le-item.done .le-item-amount { color: var(--green); }
+
+.le-item-amount {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--yellow);
+  white-space: nowrap;
+}
+
+/* Inline edit: no border at rest, border on focus */
+.le-item-desc-input {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+.le-item-desc-input:focus { border-color: var(--border); background: var(--bg2); }
+
+.le-item-amount-input {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--yellow);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  width: 90px;
+  text-align: right;
+  font-family: inherit;
+  transition: border-color 0.12s;
+}
+.le-item-amount-input:focus { border-color: var(--blue) !important; background: var(--bg2); }
+
+.le-month-sel {
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  outline: none;
+}
+.le-month-sel:hover { color: var(--text); }
+.le-del { font-size: var(--fs-md); }
+
+/* ==========================================
+   BALANCE / ACCOUNTS PANEL (right panel)
+   ========================================== */
+
+/* ==========================================
+   CALCULATOR
+   ========================================== */
+.calc-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-lg);
+  margin-top: var(--space-sm);
+}
+
+.calc-card {
+  overflow-x: auto;
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.calc-card-title {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  margin-bottom: 18px;
+}
+
+.calc-note {
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: var(--space-lg);
+  line-height: 1.5;
+}
+
+/* FIX: was flex-wrap:wrap which caused SILNIK/STBY result to drop to new line */
+.calc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: 14px;
+  flex-wrap: nowrap;
+}
+.calc-lbl {
+  font-size: var(--fs-base);
+  color: var(--text2);
+  width: 160px;
+  flex-shrink: 0;
+}
+.calc-input-sm   { width: 80px;  flex-shrink: 0; }
+.calc-input-rate { width: 100px; flex-shrink: 0; }
+.calc-sep        { color: var(--text2); font-size: var(--fs-base); white-space: nowrap; flex-shrink: 0; }
+/* calc-result always inline — same row as inputs */
+.calc-result     { font-size: var(--fs-md); font-weight: 700; color: var(--yellow); min-width: 80px; text-align: right; margin-left: auto; flex-shrink: 0; }
+
+.calc-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-sm) 0 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.calc-total-row span:first-child { color: var(--text2); font-size: 12px; }
+.calc-total-row span:last-child  { color: var(--yellow); }
+
+/* Adjustments */
+.adj-add-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.adj-sign-sel    { width: 56px; }
+.calc-input-desc { flex: 1; min-width: 100px; }
+
+.adj-list { min-height: 40px; }
+.adj-item {
+  display: grid;
+  grid-template-columns: 22px 50px 1fr auto auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-base);
+}
+.adj-item:last-child { border-bottom: none; }
+.adj-sign { font-size: var(--fs-md); font-weight: 700; text-align: center; }
+.adj-hhmm { color: var(--text2); font-size: var(--fs-base); }
+.adj-desc { color: var(--text2); font-size: 12px; }
+.adj-val  { font-weight: 600; font-size: var(--fs-base); }
+
+/* Apply bar */
+.calc-apply-bar {
+  margin-top: 20px;
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  padding: var(--space-lg) 20px;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  box-shadow: var(--shadow-sm);
+}
+.calc-apply-info {
+  flex: 1;
+  font-size: var(--fs-base);
+  color: var(--text2);
+  line-height: 1.5;
+}
+.calc-apply-status {
+  font-size: var(--fs-base);
+  min-width: 120px;
+}
+
+/* ==========================================
+   RESPONSIVE
+   (all mobile overrides in one block — fixes
+   the broken block from the original file where
+   .panel-box and .col-note were applied globally)
+   ========================================== */
+@media (max-width: 760px) {
+  .calc-layout { grid-template-columns: 1fr; }
+  .calc-lbl    { width: 100%; }
+  .content     { grid-template-columns: 1fr; }
+  .col-note    { display: none; }
+  .col-add     { width: 90px; }
+}
+
+/* mobile view link — only shown on small screens */
+.nav-mobile-link { display: none; }
+@media (max-width: 700px) { .nav-mobile-link { display: inline-block; } }
+
+/* ── toast (shared, common.js) ────────────────────────────────────────────── */
+.mb-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(12px);
+  max-width: min(90vw, 460px);
+  padding: 10px var(--space-md); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-left: 3px solid var(--green);
+  font-size: var(--fs-base); box-shadow: var(--shadow-sm);
+  opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s;
+  z-index: 200;
+}
+.mb-toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+.mb-toast-error   { border-left-color: var(--red); }
+
+/* Offline-queue badge: pending writes vs writes the server rejected. */
+.m-queue-badge.failed { background: var(--red); color: #fff; cursor: pointer; }

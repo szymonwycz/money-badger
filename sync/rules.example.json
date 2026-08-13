@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy to rules.json. Rules are matched against the lowercased transaction title plus counterpart name. Order: patterns (by priority), then merchant_map, then keywords; first hit wins. Anything unmatched goes to the LLM, or to CHECK ME when no LLM is configured — and every correction you make in the app teaches a new rule back into this file. Starting nearly empty is fine.",
+
+  "_comment_keywords": "Plain substring → category. Category names must exist in your app, or they are dropped.",
+  "keywords": {
+    "netflix": "Subscriptions: Streaming",
+    "spotify": "Subscriptions: Music",
+    "apple.com": "Subscriptions: Software",
+    "amazon": "Misc",
+    "uber": "Transport: Public transport",
+    "ikea": "Housing: Furniture"
+  },
+
+  "_comment_merchant_map": "Same as keywords, kept separate so merchant names stay readable.",
+  "merchant_map": {
+    "shell": "Transport: Fuel",
+    "bp": "Transport: Fuel"
+  },
+
+  "_comment_patterns": "Checked before the maps, highest priority first. Use for phrases that would otherwise be caught by a shorter keyword.",
+  "patterns": [
+    {"pattern": "salary", "category": "CHECK ME", "priority": 3},
+    {"pattern": "insurance", "category": "Housing: Insurance", "priority": 1}
+  ]
+}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Money Badger - daily bank fetch and push
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{DIR}}
+EnvironmentFile={{DIR}}/.env
+ExecStart={{DIR}}/venv/bin/python3 {{DIR}}/master_pi.py

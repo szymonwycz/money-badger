@@ -1,0 +1,56 @@
+{
+  "_comment": "Copy to config.json and edit. IBANs are stored without the country prefix and without spaces. Relative paths resolve against the project root.",
+
+  "output_dir": "Export",
+  "corrections_dir": "Corrections",
+
+  "_comment_accounts": "Map each IBAN to the account name you created in the app. The names must match exactly or imported transactions land on the wrong account.",
+  "account_names": {
+    "00000000000000000000000001": "Main account",
+    "00000000000000000000000002": "Partner account"
+  },
+  "own_ibans": [
+    "00000000000000000000000001",
+    "00000000000000000000000002"
+  ],
+
+  "_comment_savings": "Money arriving from these accounts is income from your own savings, not new income. Leave empty if you have none.",
+  "savings_ibans": [],
+
+  "_comment_filters": "Banks word the same event differently, so the phrases that classify a row live here rather than in the code. All matching is lowercase substring matching against the transaction title plus counterpart name.",
+  "filters": {
+    "own_transfer_titles": ["between your own accounts"],
+
+    "_comment_transfer_to_account": "A rule fires when EVERY phrase in match appears. Use it for rows that are really a transfer into another account you track — a cash withdrawal is a transfer into your cash account.",
+    "transfer_to_account": [
+      {"match": ["atm withdrawal"], "account": "Cash"}
+    ],
+
+    "savings_withdrawal_titles": [],
+
+    "_comment_skip_incoming": "Card top-ups book both legs without an IBAN, days apart. Keep only the outgoing leg or the money is counted twice.",
+    "skip_incoming_titles": ["top-up"]
+  },
+
+  "_comment_split": "One transfer that actually pays several things. Exactly one part takes \"remainder\" and absorbs whatever the fixed parts leave. total_range is the sanity check that keeps unrelated payments to the same account intact. Leave empty unless you have such a payment.",
+  "split_rules": [],
+
+  "_comment_hints": "Extra instructions appended to the categorization prompt. Use them for local knowledge the category names alone don't convey.",
+  "prompt_hints": [
+    "EV charging stations belong under car fuel, not utilities"
+  ],
+
+  "batch_size": 30,
+
+  "_comment_eb": "Enable Banking credentials. Register your own application at enablebanking.com, download the private key, and put the app id here. See docs/ENABLE_BANKING.md.",
+  "enable_banking": {
+    "app_id": "",
+    "private_key_path": "sync/enable_banking.pem",
+    "state_file": "sync/.bank_sync_state.json",
+    "days_back": 30,
+
+    "_comment_aspsp": "Which bank each IBAN belongs to, as Enable Banking names them. default_aspsp covers every IBAN not listed here.",
+    "default_aspsp": {"name": "", "country": ""},
+    "aspsp_names": {}
+  }
+}

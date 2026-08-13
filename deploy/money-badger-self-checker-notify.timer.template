@@ -1,0 +1,10 @@
+[Unit]
+Description=Send the Money Badger audit report in the morning
+# The audit runs at night; sending it then would wake you up for nothing.
+
+[Timer]
+OnCalendar=*-*-* 08:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

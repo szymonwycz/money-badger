@@ -1,0 +1,11 @@
+[Unit]
+Description=Money Badger - send the nightly audit report
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{DIR}}
+EnvironmentFile={{DIR}}/.env
+ExecStart={{DIR}}/venv/bin/python3 {{DIR}}/send_self_checker_report.py

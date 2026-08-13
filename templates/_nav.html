@@ -1,0 +1,13 @@
+{# Shared top navigation. `active` is the current page's path, passed by each view. #}
+<nav class="topnav">
+  <a href="/" class="nav-link {{ 'active' if active == '/' }}">EXPENSES</a>
+  <a href="/income" class="nav-link {{ 'active' if active == '/income' }}">INCOME</a>
+  <a href="/check-me" class="nav-link {{ 'active' if active == '/check-me' }}">CHECK ME</a>
+  <a href="/transactions" class="nav-link {{ 'active' if active == '/transactions' }}">TRANSACTIONS</a>
+  <a href="/large-expenses" class="nav-link {{ 'active' if active == '/large-expenses' }}">LARGE EXPENSES</a>
+  <a href="/overview" class="nav-link {{ 'active' if active == '/overview' }}">OVERVIEW</a>
+  {% if settings['calc.enabled'] == '1' %}
+  <a href="/calculator" class="nav-link {{ 'active' if active == '/calculator' }}">{{ settings.get('calc.tab_label', 'CALCULATOR') }}</a>
+  {% endif %}
+  <a href="/m" class="nav-link nav-mobile-link">MOBILE</a>
+</nav>

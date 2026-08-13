@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – Income</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <!-- SUMMARY-BAR dla INCOME -->
+  <div class="summary-bar" id="summary-bar">
+    <div class="sum-block">
+      <span class="sum-label">PLANNED</span>
+      <span class="sum-val" id="sum-planned">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block">
+      <span class="sum-label">RECEIVED</span>
+      <span class="sum-val sum-income" id="sum-received">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block">
+      <span class="sum-label">REMAINING</span>
+      <span class="sum-val" id="sum-remaining">—</span>
+    </div>
+    <div class="sum-divider"></div>
+    <div class="sum-block sum-block-wide" id="sum-narrative">—</div>
+  </div>
+
+  <!-- BALANCE-BAR: ACCOUNTS -->
+  <div class="balance-bar" id="balance-bar-accounts">
+    <span class="balance-bar-label">BALANCE</span>
+    <div id="balance-items-accounts"></div>
+  </div>
+
+  <!-- BALANCE-BAR: ASSETS -->
+  <div class="balance-bar" id="balance-bar-assets">
+    <span class="balance-bar-label">ASSETS</span>
+    <div id="balance-items-assets"></div>
+  </div>
+
+  <!-- MONTH NAV -->
+  <header class="month-nav">
+    <button id="btn-prev">&lt;</button>
+    <span id="month-label"></span>
+    <button id="btn-next">&gt;</button>
+  </header>
+
+  <!-- INCOME TABLE -->
+  <main class="budget-main">
+    <table class="budget-table" id="income-table">
+      <thead>
+        <tr class="col-headers">
+          <th class="col-cat">CATEGORY</th>
+          <th class="col-basic">PLANNED</th>
+          <th class="col-add">RECEIVED</th>
+          <th class="col-note">NOTE</th>
+          <th class="col-remaining">REMAINING</th>
+          <th style="width:40px"></th>
+        </tr>
+      </thead>
+      <tbody id="income-tbody"></tbody>
+    </table>
+  </main>
+
+  <!-- Add category row -->
+  <div style="margin-top:12px;display:flex;gap:10px">
+    <button class="btn btn-yellow" id="btn-add-cat">Add category</button>
+    <button class="btn btn-yellow" id="btn-copy-income">Copy INCOMES for the next month</button>
+  </div>
+
+</div>
+
+<!-- Modal: new category -->
+<div class="modal-overlay" id="add-cat-modal" style="display:none">
+  <div class="modal modal-small">
+    <div class="modal-header">
+      <h2>New category</h2>
+      <button class="close-btn" id="add-cat-modal-close">×</button>
+    </div>
+    <input type="text" id="new-cat-name" placeholder="Category name" style="width:100%;margin-bottom:12px">
+    <button class="btn btn-yellow btn-full" id="btn-add-cat-save">Add</button>
+  </div>
+</div>
+
+<script>
+const INIT_MONTH = {{ month }};
+const INIT_YEAR  = {{ year }};
+</script>
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/income.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

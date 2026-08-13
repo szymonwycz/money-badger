@@ -1,0 +1,30 @@
+{
+  "name": "Freelancer / self-employed",
+  "description": "Household plus a business side: invoiced income, deductible expenses, tax set-asides. Pairs with the calculator tab.",
+  "categories": [
+    {"name": "Business",      "children": ["Equipment", "Software", "Office", "Travel", "Accounting", "Training", "Marketing", "Subcontractors", "Other"]},
+    {"name": "Taxes",         "children": ["VAT", "Income tax", "Social security", "Health insurance", "Other"]},
+    {"name": "Housing",       "children": ["Rent / Mortgage", "Repairs & Maintenance", "Furniture", "Insurance", "Other"]},
+    {"name": "Utilities",     "children": ["Electricity", "Gas", "Water", "Internet", "Phone", "Other"]},
+    {"name": "Groceries",     "children": []},
+    {"name": "Dining",        "children": []},
+    {"name": "Transport",     "children": ["Fuel", "Public transport", "Parking", "Insurance", "Maintenance", "Leasing", "Other"]},
+    {"name": "Health",        "children": ["Doctor", "Pharmacy", "Dental", "Insurance", "Other"]},
+    {"name": "Personal",      "children": ["Clothing", "Hair & Beauty", "Sport", "Coffee", "Other"]},
+    {"name": "Subscriptions", "children": ["Streaming", "Software", "News", "Other"]},
+    {"name": "Fun",           "children": ["Hobby", "Books", "Cinema", "Games", "Other"]},
+    {"name": "Travel",        "children": ["Transport", "Accommodation", "Food", "Other"]},
+    {"name": "Gifts",         "children": []},
+    {"name": "Debt",          "children": ["Loans", "Family", "Other"]},
+    {"name": "Savings",       "children": []},
+    {"name": "Investment",    "children": []},
+    {"name": "Misc",          "children": []}
+  ],
+  "income_categories": ["Invoiced work", "Retainer", "Salary", "Bonus", "Refunds", "Loans", "From assets", "CHECK ME"],
+  "accounts": [
+    ["Business account", "bank"],
+    ["Personal account", "bank"],
+    ["Cash", "cash"],
+    ["Tax set-aside", "asset"]
+  ]
+}

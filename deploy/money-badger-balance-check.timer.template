@@ -1,0 +1,11 @@
+[Unit]
+Description=Check bank balances weekly
+# Weekly, not daily: every call counts against the bank's daily API quota,
+# and this is only a drift check - balances are computed from transactions.
+
+[Timer]
+OnCalendar=Sat *-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

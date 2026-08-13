@@ -1,0 +1,16 @@
+[Unit]
+Description=Money Badger (budget app)
+After=network.target
+
+[Service]
+User={{USER}}
+WorkingDirectory={{DIR}}
+EnvironmentFile={{DIR}}/.env
+# One worker on purpose: SQLite takes a single writer. Raising this means
+# moving to Postgres first.
+ExecStart={{DIR}}/venv/bin/gunicorn --bind 127.0.0.1:{{PORT}} --workers 1 app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+# Bank sync pipeline (Enable Banking) and LLM categorization.
+# Install on top of requirements.txt.
+requests>=2.31
+
+# Only needed when LLM_PROVIDER=anthropic. An OpenAI-compatible endpoint
+# (Ollama, LM Studio) is reached over plain requests and needs nothing here.
+anthropic>=0.40

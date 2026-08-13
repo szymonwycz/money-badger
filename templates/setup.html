@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – setup</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+<style>
+  .setup { max-width: 900px; margin: 0 auto; padding: 24px 18px 60px; }
+  .setup h1 { font-size: 26px; margin: 10px 0 4px; }
+  .setup .lead { color: var(--text2); margin-bottom: 26px; }
+  .step { background: var(--bg2); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
+  .step h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase;
+             color: var(--text2); margin: 0 0 4px; }
+  .step .hint { color: var(--text2); font-size: 13px; margin-bottom: 14px; }
+  .preset-list { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+  .preset-list label { flex: 1 1 200px; background: var(--bg); border-radius: 9px;
+                       padding: 12px 14px; cursor: pointer; border: 1px solid transparent; }
+  .preset-list label.sel { border-color: var(--blue); }
+  .preset-list strong { display: block; margin-bottom: 3px; }
+  .preset-list span { color: var(--text2); font-size: 12.5px; }
+  .tree { max-height: 340px; overflow-y: auto; background: var(--bg);
+          border-radius: 9px; padding: 12px 14px; }
+  .tree .grp { margin-bottom: 9px; }
+  .tree .grp > label { font-weight: 600; }
+  .tree .kids { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 4px 0 0 22px; }
+  .tree label { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; }
+  .rows input, .rows select { background: var(--bg); color: var(--text, #e8edf5);
+                              border: 1px solid var(--line, #2c3e57); border-radius: 7px;
+                              padding: 7px 9px; font-size: 14px; }
+  .rows .row { display: flex; gap: 8px; margin-bottom: 7px; align-items: center; }
+  .rows .row input[type=text] { flex: 1; }
+  .setup-actions { display: flex; align-items: center; gap: 16px; margin-top: 8px; }
+  .setup-err { color: var(--red, #ff453a); font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="setup">
+  <img src="/static/badger.png?v={{ v }}" style="width:78px">
+  <h1>Set up Money Badger</h1>
+
+  {% if done %}
+    <p class="lead">This install is already set up.
+      <a href="/" style="color:var(--blue)">Go to the app</a>.</p>
+  {% else %}
+  <p class="lead">Pick a starting point. Everything here is editable later from the
+     normal tabs — nothing is locked in.</p>
+
+  <div class="step">
+    <h2>1 · Categories</h2>
+    <div class="hint">Uncheck anything you won't use. You can add your own later.</div>
+    <div class="preset-list" id="presets">
+      {% for p in presets %}
+      <label data-id="{{ p.id }}">
+        <input type="radio" name="preset" value="{{ p.id }}" hidden>
+        <strong>{{ p.name }}</strong>
+        <span>{{ p.description }}</span>
+      </label>
+      {% endfor %}
+      <label data-id="">
+        <input type="radio" name="preset" value="" hidden>
+        <strong>Empty</strong>
+        <span>Start with nothing and build your own from scratch.</span>
+      </label>
+    </div>
+    <div class="tree" id="cat-tree"></div>
+  </div>
+
+  <div class="step">
+    <h2>2 · Income categories</h2>
+    <div class="hint">Where money comes from. CHECK ME is the review inbox and is always kept.</div>
+    <div class="tree" id="inc-tree" style="max-height:200px"></div>
+  </div>
+
+  <div class="step">
+    <h2>3 · Accounts</h2>
+    <div class="hint">Bank accounts, cash, and assets like savings you track but don't spend from.</div>
+    <div class="rows" id="acct-rows"></div>
+    <button class="btn btn-yellow" id="btn-add-acct" type="button">Add account</button>
+  </div>
+
+  <div class="step">
+    <h2>4 · Calculator <span style="text-transform:none;font-weight:400">(optional)</span></h2>
+    <div class="hint">
+      For variable pay — hourly, daily, per project. It multiplies quantities by
+      rates, adds tax, and writes the result into your budget. Skip it for a salary.
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+      <input type="checkbox" id="calc-on"> My income varies month to month
+    </label>
+    <div id="calc-config" style="display:none">
+      <div class="rows" id="calc-rows"></div>
+      <button class="btn btn-yellow" id="btn-add-calc" type="button">Add item</button>
+      <div class="row" style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <input type="text" id="calc-vat-label" placeholder="VAT" style="width:90px">
+        <input type="number" id="calc-vat" placeholder="rate %" style="width:100px" step="0.1" min="0">
+        <input type="text" id="calc-tax-label" placeholder="TAX" style="width:90px">
+        <input type="number" id="calc-tax" placeholder="rate %" style="width:100px" step="0.1" min="0">
+        <span class="hint" style="margin:0">Leave a rate empty if it doesn't apply.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <h2>5 · Currency</h2>
+    <div class="hint">
+      Pick yours, or choose Other to type a symbol and number format by hand.
+      The format decides whether 1 234,56 or 1,234.56 is shown.
+    </div>
+    <div class="rows" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="currency-preset" style="min-width:230px"></select>
+      <input type="text" id="currency" value="zł" style="width:90px" placeholder="symbol">
+      <input type="text" id="locale" value="pl-PL" style="width:130px" placeholder="pl-PL">
+      <span class="hint" id="currency-sample" style="margin:0"></span>
+    </div>
+  </div>
+
+  <div class="setup-actions">
+    <button class="btn btn-blue" id="btn-finish" style="padding:11px 30px;font-size:15px">Finish setup</button>
+    <span class="setup-err" id="setup-err"></span>
+  </div>
+  {% endif %}
+</div>
+
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/setup.js?v={{ v }}"></script>
+</body>
+</html>

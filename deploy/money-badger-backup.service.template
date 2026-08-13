@@ -1,0 +1,7 @@
+[Unit]
+Description=Money Badger database backup
+
+[Service]
+Type=oneshot
+User={{USER}}
+ExecStart={{DIR}}/deploy/backup-db.sh

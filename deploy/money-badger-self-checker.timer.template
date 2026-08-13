@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the Money Badger self-checker nightly at 23:45
+
+[Timer]
+OnCalendar=*-*-* 23:45:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

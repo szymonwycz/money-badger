@@ -1,0 +1,28 @@
+# Optional. The app listens on 127.0.0.1 only; this puts it on a hostname.
+#
+# The password (MB_PASSWORD_HASH in .env) is the real access control. The IP
+# allowlist below is a second layer for a home network — keep it if the app
+# should only ever be reachable from your LAN and VPN, drop it if you reach it
+# from anywhere. Do not rely on the allowlist alone: without a password, anyone
+# who lands inside those ranges has the full ledger, including DELETE.
+
+server {
+    listen 80;
+    server_name {{HOSTNAME}};
+
+    # allow 192.168.1.0/24;   # your LAN
+    # allow 100.64.0.0/10;    # Tailscale / CGNAT range
+    # allow 127.0.0.1;
+    # deny  all;
+
+    # Bulk imports post a month of transactions in one request.
+    client_max_body_size 8m;
+
+    location / {
+        proxy_pass http://127.0.0.1:{{PORT}};
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
