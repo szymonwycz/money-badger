@@ -136,4 +136,4 @@ if __name__ == "__main__":
     test_quota_exhaustion_is_remembered_across_calls()
     test_quota_exhaustion_from_fetch_also_blocks_get_balances()
     test_expired_session_401_is_also_remembered_across_calls()
-    print("OK — wszystkie testy last_skipped przeszły")
+    print("OK — all last_skipped tests passed")

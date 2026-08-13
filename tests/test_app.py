@@ -19,7 +19,7 @@ from presets import apply_preset, load_preset  # noqa: E402
 
 # Migrations create an empty schema; the starter data lives in a preset, same as
 # on a real first run. Tests build on the English household one.
-PRESET = load_preset('household-en')
+PRESET = load_preset('household')
 _seed_db = sqlite3.connect(TEST_DB)
 apply_preset(_seed_db, PRESET)
 
@@ -30,6 +30,14 @@ for _name, _type in [('Third account', 'bank'), ('Business account', 'bank'),
 
 _seed_db.commit()
 _seed_db.close()
+
+
+def test_the_transactions_table_has_no_author_column_without_logins(client):
+    """With the login switched off nobody is signed in, so there is nothing to
+    attribute a row to and the column would be a stripe of empty cells."""
+    html = client.get('/transactions').get_data(as_text=True)
+    assert '>BY<' not in html
+    assert 'colspan="8"' in html
 
 
 @pytest.fixture()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 push_actuals.py — czyta Export/ CSVy i pushuje transakcje do aplikacji.
-Uruchamiany przez master.py po każdym imporcie.
+Run by master_pi.py after every import.
 """
 import csv
 import glob
@@ -45,7 +45,7 @@ def get_json(path):
 
 
 def parse_amount(s):
-    """'1 309,00 zł' → 1309.0"""
+    """'1 309,00 zł' -> 1309.0"""
     s = s.strip()
     negative = s.startswith("(") and s.endswith(")")
     s = re.sub(r"[()zł\s]", "", s).replace(",", ".").replace(" ", "")
@@ -99,7 +99,7 @@ def read_csv(path):
 
 
 def pull_corrections(corrections_dir: Path):
-    """Pobierz niezsynced korekty z aplikacji → zapisz CSV → zwróć liczbę korekt."""
+    """Pull unsynced corrections from the app, write them to CSV, return how many."""
     try:
         content, headers = budget_client.request(
             "/api/corrections?synced=0", timeout=10, with_headers=True)
@@ -108,10 +108,10 @@ def pull_corrections(corrections_dir: Path):
         # be marked as handled when it never made it into any CSV
         ids = headers.get("X-Correction-Ids", "")
     except Exception as e:
-        print(f"  [push_actuals] Nie udało się pobrać korekt: {e}")
+        print(f"  [push_actuals] Could not fetch corrections: {e}")
         return 0
 
-    # Sprawdź czy są jakieś wiersze (poza nagłówkiem)
+    # Anything beyond the header row?
     lines = [l for l in content.strip().splitlines() if l.strip()]
     if len(lines) <= 1:
         print("  [push_actuals] Brak nowych korekt.")
@@ -131,11 +131,11 @@ def mark_corrections_synced():
         post_json("/api/corrections/mark-synced", {})
         print("  [push_actuals] Korekty oznaczone jako synced.")
     except Exception as e:
-        print(f"  [push_actuals] Błąd oznaczania korekt: {e}")
+        print(f"  [push_actuals] Could not mark corrections as synced: {e}")
 
 
 def push(corrections_dir: Path = None):
-    # 1. Pobierz korekty (jeśli podano ścieżkę)
+    # 1. Pull corrections, when a path was given
     n_corrections = 0
     if corrections_dir:
         n_corrections = pull_corrections(corrections_dir)
@@ -174,12 +174,12 @@ def push(corrections_dir: Path = None):
             # meant a row the server skipped (bad date, constraint violation) was never
             # retried by any later run — it just vanished from the budget.
             accepted = set(result.get("accepted") or [])
-            print(f"  [push_actuals] Pushowano {inserted} nowych transakcji ({len(new_txs)} kandydatów).")
+            print(f"  [push_actuals] Pushed {inserted} new transactions ({len(new_txs)} candidates).")
 
             rejected = [tx for tx in new_txs if tx["hash"] not in accepted]
             if rejected:
-                print(f"  [push_actuals] UWAGA: serwer odrzucił {len(rejected)} wierszy — "
-                      f"zostaną ponowione przy następnym runie:")
+                print(f"  [push_actuals] WARNING: the server rejected {len(rejected)} row(s) — "
+                      f"they will be retried on the next run:")
                 for tx in rejected[:10]:
                     print(f"    - {tx['date']} {tx['amount']} {tx['account']} {tx['description'][:40]}")
 
@@ -190,11 +190,11 @@ def push(corrections_dir: Path = None):
             # HTTPError subclasses URLError, so it used to be reported as the app
             # being unreachable — a 413 (batch over nginx's body limit) then repeated
             # every day with a misleading message and nothing ever got through.
-            print(f"  [push_actuals] aplikacja odrzuciła żądanie: HTTP {e.code} {e.reason}. "
-                  f"Nic nie oznaczono jako wysłane — ponowię przy następnym runie.")
+            print(f"  [push_actuals] the app refused the request: HTTP {e.code} {e.reason}. "
+                  f"Nothing was marked as sent, so the next run retries it.")
             return n_corrections
         except budget_client.URLError as e:
-            print(f"  [push_actuals] aplikacja niedostępna: {e}. Pomijam.")
+            print(f"  [push_actuals] app unreachable: {e}. Skipping.")
             return n_corrections
 
     return n_corrections

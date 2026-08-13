@@ -87,7 +87,7 @@ function renderTable() {
       </td>
     `;
 
-    // Blur save dla każdego inputa
+    // save on blur, for every input
     tr.querySelectorAll('input[data-field]').forEach(input => {
       const catId = parseInt(input.dataset.catid);
       input.addEventListener('focus', () => { input.style.borderBottomColor = 'var(--border)'; });
@@ -126,7 +126,7 @@ function renderTable() {
 // ── save entry ────────────────────────────────────────────────────────────────
 
 async function saveEntry(catId, changedField) {
-  // Zbierz aktualne wartości z DOM
+  // read the current values straight from the DOM
   const row = document.querySelector(`input[data-catid="${catId}"][data-field="planned"]`)?.closest('tr');
   if (!row) return;
 
@@ -153,7 +153,7 @@ async function saveEntry(catId, changedField) {
   if (entry) { entry.planned = planned; entry.received = received; entry.note = note; }
 
   updateSummary();
-  // Przerenderuj tylko wiersz REMAINING (nie cały tbody żeby nie stracić focusu)
+  // Re-render only the REMAINING row; redrawing the whole tbody would steal focus
   const remCell = row.querySelector('.remaining-val');
   if (remCell) {
     const rem = planned - received;

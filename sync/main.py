@@ -16,6 +16,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shutil
 import sys
 from collections import defaultdict
@@ -42,6 +43,7 @@ PROJECT_ROOT = BASE_DIR.parent
 ENV_FILE     = BASE_DIR / ".env"
 CFG_FILE     = BASE_DIR / "config.json"
 RULES_FILE   = BASE_DIR / "rules.json"
+MARKET_DIR   = BASE_DIR / "market"
 
 
 def resolve_path(p: str) -> Path:
@@ -88,6 +90,47 @@ def valid_categories() -> set:
     return load_categories()[1]
 
 
+# ─── Currency ─────────────────────────────────────────────────────────────────
+#
+# The currency symbol belongs to the app too — it is asked for during setup and
+# kept in its settings table, so every screen and this script show the same one.
+# It is used for console output only: the CSV this script writes is machine data
+# and carries a bare number (see generate_money_pro_csv).
+
+_currency = None  # cache: symbol string — see currency()
+
+
+def currency() -> str:
+    """Currency symbol from the app's settings. An unreachable app is not worth
+    failing a sync over — amounts then print without a symbol."""
+    global _currency
+    if _currency is None:
+        try:
+            _currency = (budget_client.get("/api/settings") or {}).get("currency", "")
+        except Exception:
+            _currency = ""
+    return _currency
+
+
+# ─── Market hint packs ────────────────────────────────────────────────────────
+#
+# Wording that only one country's banks use ("PŁATNOŚĆ KARTĄ" before a merchant
+# name) helps the model read a statement, but it is knowledge about a market, not
+# about budgeting. It lives in sync/market/<code>.json and is named by "market" in
+# config.json. No pack, or a pack without the key asked for, simply means no hints.
+
+def market_hints(cfg: dict, key: str) -> list:
+    """Statement phrases for the configured market, or [] when there are none."""
+    name = (cfg.get("market") or "").strip()
+    if not name:
+        return []
+    path = MARKET_DIR / f"{name}.json"
+    if not path.exists():
+        print(f"  No market hint pack '{name}' in {MARKET_DIR} — continuing without hints.")
+        return []
+    return json.loads(path.read_text(encoding="utf-8")).get(key, [])
+
+
 # ─── Config loading ────────────────────────────────────────────────────────────
 
 def load_env() -> dict:
@@ -120,12 +163,16 @@ def check_config_ready() -> tuple[bool, list[str]]:
     """Return (ok, list_of_missing_items)."""
     missing = []
     env = load_env()
-    if not get_api_key(env):
-        missing.append("LLM nieskonfigurowany (LLM_PROVIDER / ANTHROPIC_API_KEY) — kategoryzacja tylko regułami")
+    # llm.configured() answers for every provider it supports (and for a local
+    # server with no key at all); get_api_key() only ever sees the Anthropic one,
+    # so asking it alone declared five providers out of six unconfigured.
+    if not llm.configured() and not get_api_key(env):
+        missing.append("no LLM configured (set LLM_PROVIDER and the API key it needs, "
+                       "e.g. ANTHROPIC_API_KEY / OPENAI_API_KEY) — rules-only categorization")
     cfg = load_config()
     for key in ("output_dir", "account_names"):
         if key not in cfg:
-            missing.append(f"config.json: brakuje pola '{key}'")
+            missing.append(f"config.json: missing field '{key}'")
     return len(missing) == 0, missing
 
 # ─── Setup wizard ──────────────────────────────────────────────────────────────
@@ -137,8 +184,8 @@ def _ask(prompt: str, default: str = "") -> str:
 
 
 def run_setup():
-    print("\n=== money-badger sync: konfiguracja ===\n")
-    print("Podaj puste pole (Enter) gdy chcesz użyć domyślnej wartości.\n")
+    print("\n=== money-badger sync: configuration ===\n")
+    print("Leave a field empty (Enter) to keep the default.\n")
 
     env  = load_env()
     cfg  = load_config()
@@ -146,43 +193,43 @@ def run_setup():
     # ── API key ──────────────────────────────────────────────
     current_key = get_api_key(env)
     masked = f"sk-ant-...{current_key[-6:]}" if current_key else ""
-    print("── Klucz Anthropic API (Enter = bez LLM, same reguły) ─")
+    print("── Anthropic API key (Enter = no LLM, rules only) ─────")
     new_key = _ask("ANTHROPIC_API_KEY", masked)
     if new_key and not new_key.startswith("sk-ant-..."):
         env["ANTHROPIC_API_KEY"] = new_key
 
-    # ── Ścieżki ───────────────────────────────────────────────
-    print("\n── Ścieżki folderów ──────────────────────────────────")
-    cfg["output_dir"]     = _ask("Folder na CSV z transakcjami (Export)", cfg.get("output_dir", "Export"))
-    cfg["corrections_dir"] = _ask("Folder na poprawki z aplikacji",       cfg.get("corrections_dir", "Corrections"))
+    # ── Paths ─────────────────────────────────────────────────
+    print("\n── Folders ───────────────────────────────────────────")
+    cfg["output_dir"]     = _ask("Folder for transaction CSVs (Export)", cfg.get("output_dir", "Export"))
+    cfg["corrections_dir"] = _ask("Folder for corrections from the app",  cfg.get("corrections_dir", "Corrections"))
 
-    # ── Konta własne ──────────────────────────────────────────
-    print("\n── Konta bankowe (IBAN → nazwa konta w aplikacji) ────")
-    print("Wpisuj IBAN i nazwę po kolei. Enter bez IBAN = koniec.\n")
+    # ── Own accounts ──────────────────────────────────────────
+    print("\n── Bank accounts (IBAN → account name in the app) ─────")
+    print("Enter one IBAN and name at a time. Empty IBAN = done.\n")
 
     account_names: dict = cfg.get("account_names", {})
     own_ibans: list     = cfg.get("own_ibans", list(account_names.keys()))
     savings_ibans: list = cfg.get("savings_ibans", [])
 
     while True:
-        iban = _iban.bare_iban(input("  IBAN (lub Enter = koniec): "))
+        iban = _iban.bare_iban(input("  IBAN (or Enter = done): "))
         if not iban:
             break
-        name = _ask(f"  Nazwa konta dla {iban[-8:]}", account_names.get(iban, ""))
+        name = _ask(f"  Account name for {iban[-8:]}", account_names.get(iban, ""))
         account_names[iban] = name
         if iban not in own_ibans:
-            is_own = _ask(f"  Konto własne? (t/n)", "t").lower()
-            if is_own in ("t", "tak", "y", "yes"):
+            is_own = _ask(f"  Your own account? (y/n)", "y").lower()
+            if is_own in ("y", "yes"):
                 own_ibans.append(iban)
 
     cfg["account_names"] = account_names
     cfg["own_ibans"]     = own_ibans
 
-    # ── Konta oszczędnościowe ─────────────────────────────────
-    print("\n── Konta oszczędnościowe (przelewy z nich = 'From assets') ──")
-    print("Wpisuj IBANy. Enter bez IBAN = koniec.\n")
+    # ── Savings accounts ──────────────────────────────────────
+    print("\n── Savings accounts (money from them = 'From assets') ──")
+    print("Enter IBANs. Empty IBAN = done.\n")
     while True:
-        iban = _iban.bare_iban(input("  IBAN oszczędnościowy (lub Enter = koniec): "))
+        iban = _iban.bare_iban(input("  Savings IBAN (or Enter = done): "))
         if not iban:
             break
         if iban not in savings_ibans:
@@ -191,8 +238,19 @@ def run_setup():
     cfg["savings_ibans"] = savings_ibans
     cfg["batch_size"]    = cfg.get("batch_size", 30)
 
-    # ── Zapis ─────────────────────────────────────────────────
-    print("\n── Zapisuję konfigurację ─────────────────────────────")
+    # ── Market hint pack ──────────────────────────────────────
+    packs = sorted(p.stem for p in MARKET_DIR.glob("*.json")) if MARKET_DIR.exists() else []
+    print("\n── Market hint pack (optional) ───────────────────────")
+    print(f"Statement wording your banks use, from sync/market/. Available: "
+          f"{', '.join(packs) or 'none'}. Enter = none.")
+    market = _ask("Market code", cfg.get("market", ""))
+    if market:
+        cfg["market"] = market
+    else:
+        cfg.pop("market", None)
+
+    # ── Save ──────────────────────────────────────────────────
+    print("\n── Saving configuration ──────────────────────────────")
 
     env_lines = [f"{k}={v}" for k, v in env.items()]
     ENV_FILE.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
@@ -201,7 +259,7 @@ def run_setup():
     CFG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  config.json → {CFG_FILE}")
 
-    print("\nGotowe! Uruchom teraz: python main.py fetch-setup\n")
+    print("\nDone! Now run: python main.py fetch-setup\n")
 
 # ─── Filtering ─────────────────────────────────────────────────────────────────
 
@@ -250,7 +308,7 @@ def filter_transactions(transactions: list, own_ibans: list, savings_ibans: list
             # account books its own outgoing transfer a day or two later
             # and that row is the whole transfer — keeping this side too invents
             # income and credits the balance twice.
-            print(f"  Pomijam przychodzące doładowanie (druga noga przelewu): {tx['title'][:60]}")
+            print(f"  Skipping incoming top-up (the other leg of a transfer): {tx['title'][:60]}")
             continue
         elif c_iban in own_set or is_own_title:
             if tx["amount"] > 0:
@@ -327,25 +385,25 @@ def _categorize_batch(transactions: list, api_key: str, hints: list = None) -> l
     # really petrol stations, what an unrecognizable acronym is. From config.json.
     hint_lines = "".join(f"\n- {h}" for h in (hints or []))
 
-    prompt = f"""Jesteś asystentem kategoryzującym transakcje bankowe.
+    prompt = f"""You are an assistant that categorizes bank transactions.
 
-Oto dostępne kategorie i podkategorie:
+These are the available categories and subcategories:
 {load_categories()[0]}
 
-Zasady:
-- Kwoty ujemne (amount < 0) to wydatki → kategorie z EXPENSES
-- Kwoty dodatnie (amount > 0) to przychody → kategorie z INCOME
-- is_transfer=true → kategoria "" (Money Transfer, kategoria pusta)
-- Separator kategorii i podkategorii: ": " (np. "Transport: Fuel")
-- Jeśli nie jesteś pewny → użyj "CHECK ME"
-- NIE twórz nowych kategorii{hint_lines}
+Rules:
+- Negative amounts (amount < 0) are expenses → categories from EXPENSES
+- Positive amounts (amount > 0) are income → categories from INCOME
+- is_transfer=true → category "" (Money Transfer, empty category)
+- Separator between category and subcategory: ": " (e.g. "Transport: Fuel")
+- If you are not sure → use "CHECK ME"
+- Do NOT create new categories{hint_lines}
 
-Transakcje:
+Transactions:
 {json.dumps(tx_list, ensure_ascii=False, indent=2)}
 
-Odpowiedz WYŁĄCZNIE w formacie JSON:
+Answer with JSON ONLY, in this format:
 [
-  {{"idx": 0, "category": "Car: Fuel", "note": "krótka notatka"}},
+  {{"idx": 0, "category": "Car: Fuel", "note": "short note"}},
   ...
 ]"""
 
@@ -383,7 +441,7 @@ def categorize_transactions(transactions: list, cfg: dict, api_key: str) -> list
             pre_categorized[i] = {"category": cat, "note": ""}
 
     rules_count = len(pre_categorized)
-    print(f"  Rules/transfers: {rules_count}/{len(transactions)} bez LLM")
+    print(f"  Rules/transfers: {rules_count}/{len(transactions)} without the LLM")
 
     unknown_pairs   = [(i, tx) for i, tx in enumerate(transactions) if i not in pre_categorized]
     unknown_indices = [i for i, _ in unknown_pairs]
@@ -391,13 +449,13 @@ def categorize_transactions(transactions: list, cfg: dict, api_key: str) -> list
 
     llm_results = []
     if unknown_txs and not (llm.configured() or api_key):
-        print(f"  Bez LLM: {len(unknown_txs)} transakcji trafia do CHECK ME.")
+        print(f"  No LLM: {len(unknown_txs)} transactions go to CHECK ME.")
     elif unknown_txs:
         total = (len(unknown_txs) - 1) // batch_size + 1
         for j in range(0, len(unknown_txs), batch_size):
             part = j // batch_size + 1
             batch = unknown_txs[j:j + batch_size]
-            print(f"  LLM partia {part}/{total} ({len(batch)} transakcji)...")
+            print(f"  LLM batch {part}/{total} ({len(batch)} transactions)...")
             llm_results.extend(_categorize_batch(batch, api_key, cfg.get("prompt_hints")))
 
     llm_map = {unknown_indices[i]: llm_results[i] for i in range(len(llm_results))}
@@ -424,14 +482,18 @@ def generate_money_pro_csv(transactions: list, account_name: str, account_names:
     for tx in transactions:
         amount  = tx["amount"]
         amt_abs = abs(amount)
-        amt_str = f"{amt_abs:,.2f}".replace(",", " ").replace(".", ",") + " zł"
+        # Machine data, so a bare number: no thousands separator, no currency
+        # symbol. Everything that reads this file parses the amount straight back
+        # (push_actuals.py, then `learn`), and how money is *shown* to a person is
+        # the app's business — it has the currency and the locale.
+        amt_str = f"{amt_abs:.2f}"
 
         if tx.get("_transfer"):
             tx_type     = "Money Transfer"
             category    = ""
             account_to  = tx.get("_to_account") or account_names.get(tx.get("counterpart_iban", ""), "")
             if not account_to:
-                print(f"  UWAGA: przelew własny bez nazwy konta docelowego — IBAN {tx.get('counterpart_iban', '?')[-10:]}... Dodaj go do account_names w config.json")
+                print(f"  WARNING: own transfer with no target account name — IBAN {tx.get('counterpart_iban', '?')[-10:]}... Add it to account_names in config.json")
             amount_recv = amt_str
         elif amount > 0:
             tx_type     = "Income"
@@ -496,7 +558,7 @@ def split_transactions(transactions: list, rules: list = None) -> list:
 
         fixed = sum(p["amount"] for p in rule["parts"] if p["amount"] != "remainder")
         remainder = amount + fixed  # amount is negative; fixed parts are positive magnitudes
-        print(f"  Rozbijam przelew {amount:.2f} na {len(rule['parts'])} pozycji")
+        print(f"  Splitting transfer {amount:.2f} into {len(rule['parts'])} entries")
 
         base = {k: v for k, v in tx.items()
                 if k not in ("amount", "category", "_transfer", "_to_account")}
@@ -526,8 +588,8 @@ def _eb_config(cfg: dict) -> dict:
     """Return enable_banking sub-config, raising if missing."""
     eb = cfg.get("enable_banking")
     if not eb:
-        print("Brak sekcji 'enable_banking' w config.json.")
-        print("Dodaj ją lub uruchom: python main.py fetch-setup")
+        print("No 'enable_banking' section in config.json.")
+        print("Add one, or run: python main.py fetch-setup")
         sys.exit(1)
     return eb
 
@@ -546,7 +608,7 @@ def cmd_fetch_setup(args):
 
     ibans = args.ibans or cfg.get("own_ibans", [])
     if not ibans:
-        print("Brak kont do autoryzacji. Podaj IBANy jako argumenty lub ustaw own_ibans w config.json.")
+        print("No accounts to authorize. Pass IBANs as arguments or set own_ibans in config.json.")
         sys.exit(1)
 
     # Which bank each IBAN belongs to. The account name doesn't tell you — an
@@ -572,7 +634,7 @@ def cmd_fetch(args):
     # still run and whatever they don't match lands in CHECK ME for review.
     # Every review teaches a rule back, so this gets better on its own.
     if not llm.configured() and not api_key:
-        print("Bez LLM — kategoryzuję wyłącznie regułami, reszta trafi do CHECK ME.")
+        print("No LLM — categorizing by rules only, everything else goes to CHECK ME.")
 
     eb = _eb_config(cfg)
     output_dir = resolve_path(cfg["output_dir"])
@@ -590,12 +652,12 @@ def cmd_fetch(args):
 
     ibans = cfg.get("own_ibans", [])
     if not ibans:
-        print("Brak own_ibans w config.json.")
+        print("No own_ibans in config.json.")
         sys.exit(1)
 
-    # Fallback dla kont bez lokalnego stanu last_fetch (np. po reset/migracji):
-    # zamiast od razu ciąć do cap_date, wznów od ostatniej transakcji zapisanej
-    # w aplikacji dla danego konta.
+    # Fallback for accounts with no local last_fetch state (after a reset or a
+    # migration, say): instead of cutting straight back to cap_date, resume from
+    # the last transaction the app has stored for that account.
     fallback_dates = {}
     try:
         last_dates_by_name = budget_client.get("/api/accounts/last-dates")
@@ -604,12 +666,12 @@ def cmd_fetch(args):
             if name in last_dates_by_name:
                 fallback_dates[full_iban] = last_dates_by_name[name]
     except Exception as e:
-        print(f"  [fallback_dates] aplikacja niedostępna ({e}) — pomijam.")
+        print(f"  [fallback_dates] app unreachable ({e}) — skipping.")
 
     if use_smart_window:
-        print("Pobieranie transakcji przez Enable Banking (smart window)...\n")
+        print("Fetching transactions through Enable Banking (smart window)...\n")
     else:
-        print(f"Pobieranie transakcji z ostatnich {days_back} dni przez Enable Banking...\n")
+        print(f"Fetching transactions from the last {days_back} days through Enable Banking...\n")
     fetched = fetcher.fetch(ibans, days_back=days_back, use_smart_window=use_smart_window,
                              fallback_dates=fallback_dates, dry_run=args.dry_run)
 
@@ -620,13 +682,13 @@ def cmd_fetch(args):
     skipped_ibans = list(getattr(fetcher, "last_skipped", []))
     skip_reasons = getattr(fetcher, "skip_reasons", {})
     failed_accounts = [account_names.get(iban, iban[-4:]) for iban in skipped_ibans]
-    # Reason per account name, English — this is what ends up in the Telegram
-    # message (master_pi.py), kept separate from the Polish console prints above.
+    # Reason per account name — this is what ends up in the Telegram message
+    # (master_pi.py), so it stays short enough to read on a phone.
     failed_reasons = {
         account_names.get(iban, iban[-4:]): skip_reasons.get(iban, "unknown reason")
         for iban in skipped_ibans
     }
-    accounts_out = []  # dla .last_fetch_summary.json (master_pi.py -> Telegram)
+    accounts_out = []  # for .last_fetch_summary.json (master_pi.py -> Telegram)
 
     def _write_summary():
         if args.dry_run:
@@ -640,17 +702,19 @@ def cmd_fetch(args):
     if not fetched:
         _write_summary()
         if failed_accounts:
-            print(f"\n❌ SYNC NIEUDANY — {len(failed_accounts)} kont bez próby pobrania: "
-                  f"{', '.join(failed_accounts)}. Zobacz błędy wyżej.")
+            print(f"\n❌ SYNC FAILED — {len(failed_accounts)} account(s) never even got a fetch "
+                  f"attempt: {', '.join(failed_accounts)}. See the errors above.")
             sys.exit(1)
-        print("Brak transakcji (sprawdź czy sesje są aktywne: python main.py fetch-setup).")
+        print("No transactions (check that the sessions are still valid: python main.py fetch-setup).")
         return
+
+    cur = currency()
 
     for iban, raw_transactions in fetched:
         account_name = account_names.get(iban, iban[-4:])
         full_iban = _iban.full_iban(iban, _iban_country(cfg))
         print(f"\n── {account_name} ({iban[-10:]}...) ──────────────────────────────────────")
-        print(f"  Transakcji: {len(raw_transactions)}")
+        print(f"  Transactions: {len(raw_transactions)}")
         account_summary = []
 
         try:
@@ -659,20 +723,20 @@ def cmd_fetch(args):
                 cfg.get("filters")
             )
             transfers = sum(1 for tx in transactions if tx.get("_transfer"))
-            print(f"  Po filtracji: {len(transactions)} (w tym {transfers} przelewów własnych)")
+            print(f"  After filtering: {len(transactions)} ({transfers} of them own transfers)")
 
             if not transactions:
-                print("  Brak transakcji do przetworzenia.")
+                print("  Nothing to process.")
             else:
-                print("  Kategoryzuję...")
+                print("  Categorizing...")
                 categorized = categorize_transactions(transactions, cfg, api_key)
                 categorized = split_transactions(categorized, cfg.get("split_rules"))
 
-                print(f"\n  ── Transakcje ──────────────────────────────────────────────")
+                print(f"\n  ── Transactions ────────────────────────────────────────────")
                 for tx in categorized:
                     sign = "+" if tx["amount"] > 0 else "-"
                     amt  = abs(tx["amount"])
-                    print(f"  {tx['transaction_date']}  {sign}{amt:>9.2f} PLN  {tx.get('category',''):<30}  {tx['title'][:40]}")
+                    print(f"  {tx['transaction_date']}  {sign}{amt:>9.2f} {cur}  {tx.get('category',''):<30}  {tx['title'][:40]}")
                     tx_type = "Money Transfer" if tx.get("_transfer") else ("Income" if tx["amount"] > 0 else "Expense")
                     if tx.get("_transfer"):
                         other = tx.get("_to_account") or account_names.get(tx.get("counterpart_iban", ""), "") or "?"
@@ -687,7 +751,7 @@ def cmd_fetch(args):
                 print()
 
                 if args.dry_run:
-                    print("  [dry-run] Plik nie został zapisany.")
+                    print("  [dry-run] File not written.")
                 else:
                     output_dir.mkdir(parents=True, exist_ok=True)
                     today    = date.today().isoformat()
@@ -696,7 +760,7 @@ def cmd_fetch(args):
                         generate_money_pro_csv(categorized, account_name, account_names),
                         encoding="utf-8",
                     )
-                    print(f"  Zapisano: {out_path}")
+                    print(f"  Written: {out_path}")
 
             # Only now — filtered, categorized, written to disk — is it safe to
             # advance the checkpoint for this account. dry-run never commits,
@@ -708,19 +772,19 @@ def cmd_fetch(args):
         except Exception as e:
             failed_accounts.append(account_name)
             failed_reasons[account_name] = str(e)[:150]
-            print(f"\n  ❌ BŁĄD przetwarzania konta {account_name}: {e!r}")
-            print(f"  ⚠ Checkpoint NIE przesunięty dla tego konta — transakcje zostaną ponowione"
-                  f" przy następnym uruchomieniu (nie są zgubione).")
+            print(f"\n  ❌ ERROR processing account {account_name}: {e!r}")
+            print(f"  ⚠ Checkpoint NOT advanced for this account — its transactions will be"
+                  f" fetched again on the next run (nothing is lost).")
 
     _write_summary()
 
     if failed_accounts:
-        print(f"\n❌ SYNC CZĘŚCIOWO NIEUDANY — {len(failed_accounts)} kont z błędem lub bez próby "
-              f"pobrania: {', '.join(failed_accounts)}. Zobacz błędy wyżej.")
+        print(f"\n❌ SYNC PARTIALLY FAILED — {len(failed_accounts)} account(s) errored or never "
+              f"got a fetch attempt: {', '.join(failed_accounts)}. See the errors above.")
     else:
-        print(f"\n✅ Wszystkie konta ({len(fetched)}) przetworzone poprawnie.")
+        print(f"\n✅ All accounts ({len(fetched)}) processed successfully.")
 
-    print("Gotowe! Pliki CSV czekają na push_actuals.py.")
+    print("Done! The CSV files are waiting for push_actuals.py.")
 
     if failed_accounts:
         sys.exit(1)
@@ -730,11 +794,11 @@ def cmd_fetch(args):
 
 
 def cmd_fetch_balances(args):
-    """Pobiera salda kont bankowych przez Enable Banking i porównuje z saldem liczonym
-    w aplikacji (checkpoint + suma transakcji). NIE nadpisuje salda — aplikacja liczy
-    je samo z listy transakcji; to tylko kontrola rozbieżności (brakujące/zdublowane tx).
-    Pomija konta Revolut (nie wspierane przez EB w prosty sposób) i konta oszczędnościowe
-    (savings_ibans nie mają autoryzacji EB)."""
+    """Fetch bank balances through Enable Banking and compare them with the balance the
+    app computes (checkpoint + sum of transactions). It NEVER overwrites the balance —
+    the app derives that from the transaction list; this is only a discrepancy check
+    (missing or duplicated transactions). Skips Revolut accounts (not supported by EB
+    in any simple way) and savings accounts (savings_ibans have no EB authorization)."""
     import urllib.error
     import urllib.request
 
@@ -747,7 +811,7 @@ def cmd_fetch_balances(args):
         if (name := account_names.get(iban, "").strip().lower()) and "revolut" not in name
     ]
     if not ibans:
-        print("Brak skonfigurowanych kont bankowych do synchronizacji sald.")
+        print("No bank accounts configured for a balance check.")
         return
 
     from banks.enable_banking import EnableBankingFetcher
@@ -758,15 +822,16 @@ def cmd_fetch_balances(args):
         iban_country=_iban_country(cfg),
     )
 
-    print("Pobieranie sald przez Enable Banking...\n")
+    print("Fetching balances through Enable Banking...\n")
     balances = fetcher.get_balances(ibans)
 
     try:
         budget_accounts = budget_client.get("/api/accounts")
     except Exception as e:
-        print(f"Aplikacja niedostępna ({e}) — pomijam push sald.")
+        print(f"App unreachable ({e}) — skipping the balance check.")
         return
     name_to_account = {a["name"]: a for a in budget_accounts}
+    cur = currency()
 
     for iban in ibans:
         bare_iban = _iban.bare_iban(iban)
@@ -776,22 +841,44 @@ def cmd_fetch_balances(args):
             continue
         account = name_to_account.get(name)
         if not account:
-            print(f"  Konto '{name}' nie istnieje w aplikacji — pomijam.")
+            print(f"  Account '{name}' does not exist in the app — skipping.")
             continue
         if abs(account["balance"] - balance) < 0.01:
-            print(f"  {name}: {balance:.2f} PLN (zgodne)")
+            print(f"  {name}: {balance:.2f} {cur} (matches)")
             continue
         diff = balance - account["balance"]
-        print(f"  ⚠ {name}: app={account['balance']:.2f} PLN, bank={balance:.2f} PLN "
-              f"(różnica {diff:+.2f} zł — sprawdź brakujące/zdublowane transakcje)")
+        print(f"  ⚠ {name}: app={account['balance']:.2f} {cur}, bank={balance:.2f} {cur} "
+              f"(difference {diff:+.2f} {cur} — check for missing or duplicated transactions)")
 
 
 # ─── learn command ────────────────────────────────────────────────────────────
 
-LEARN_SYSTEM_PROMPT = """Jesteś ekspertem od kategoryzacji transakcji bankowych.
-Analizujesz opisy transakcji z banku i przypisane im kategorie Money Pro.
-Generujesz reguły do automatycznej kategoryzacji przyszłych transakcji.
-Odpowiadaj WYŁĄCZNIE w formacie JSON. Bez tekstu przed ani po. Bez bloków ```."""
+LEARN_SYSTEM_PROMPT = """You are an expert on categorizing bank transactions.
+You analyze transaction descriptions from a bank and the Money Pro categories assigned to them.
+You produce rules that categorize future transactions automatically.
+Answer with JSON ONLY. No text before or after. No ``` blocks."""
+
+
+def parse_amount(text: str) -> float:
+    """'1 234,56 zł' / '$1,234.56' / '-1234.56' → float. 0.0 when unreadable.
+
+    Amounts reach this script from the app's corrections export, which formats
+    money for whichever currency and locale the app is set to, so nothing here may
+    assume a symbol or a separator. Everything but digits, separators and the sign
+    is dropped; the last separator is the decimal point when one or two digits
+    follow it (money), and a thousands separator otherwise.
+    """
+    s = text.strip()
+    negative = s.startswith("(") and s.endswith(")")  # accounting notation for a minus
+    s = re.sub(r"[^0-9,.\-]", "", s)
+    m = re.search(r"[.,](\d{1,2})$", s)
+    head, frac = (s[:m.start()], m.group(1)) if m else (s, "")
+    s = head.replace(",", "").replace(".", "") + (f".{frac}" if frac else "")
+    try:
+        amount = float(s)
+    except ValueError:
+        return 0.0
+    return -amount if negative else amount
 
 
 def parse_money_pro_csv(path: Path) -> list:
@@ -803,15 +890,7 @@ def parse_money_pro_csv(path: Path) -> list:
             desc     = (row.get("Description") or "").strip()
             tx_type  = (row.get("Transaction Type") or "").strip()
 
-            s = (row.get("Amount") or "0").strip()
-            negative = s.startswith("(") and s.endswith(")")
-            s = s.strip("()").replace(" ", "").replace("zł", "").replace(",", ".").strip()
-            try:
-                amount = float(s)
-                if negative:
-                    amount = -amount
-            except ValueError:
-                amount = 0.0
+            amount = parse_amount(row.get("Amount") or "0")
 
             if tx_type in ("Money Transfer", "Opening Balance", "Balance Adjustment"):
                 continue
@@ -823,7 +902,7 @@ def parse_money_pro_csv(path: Path) -> list:
     return transactions
 
 
-def generate_new_rules(transactions: list, api_key: str) -> dict:
+def generate_new_rules(transactions: list, api_key: str, hints: list = None) -> dict:
     by_category = defaultdict(list)
     for tx in transactions:
         by_category[tx["category"]].append(tx["description"])
@@ -832,39 +911,43 @@ def generate_new_rules(transactions: list, api_key: str) -> dict:
 
     valid_list = "\n".join(f"  {c}" for c in sorted(valid_categories()))
 
-    prompt = f"""Przeanalizuj poniższe przykłady transakcji bankowych z ich kategoriami Money Pro.
-Wygeneruj NOWE reguły kategoryzacji na podstawie tych przykładów.
+    # Wording the local banks use, from the market hint pack. Empty for a market
+    # nobody has written a pack for — the rules below stand on their own.
+    hint_lines = "".join(f"\n- {h}" for h in (hints or []))
 
-PRZYKŁADY (kategoria → opisy z banku):
+    prompt = f"""Analyze the bank transactions below together with their Money Pro categories.
+Produce NEW categorization rules based on those examples.
+
+EXAMPLES (category → descriptions from the bank):
 {json.dumps(examples, ensure_ascii=False, indent=2)}
 
-Wygeneruj JSON z nowymi regułami:
+Produce JSON with the new rules:
 {{
   "keywords": {{
-    "słowo_kluczowe_lowercase": "Kategoria: Podkategoria"
+    "keyword_lowercase": "Category: Subcategory"
   }},
   "patterns": [
     {{
-      "pattern": "fragment opisu lowercase",
-      "category": "Kategoria: Podkategoria",
+      "pattern": "fragment of the description lowercase",
+      "category": "Category: Subcategory",
       "priority": 1
     }}
   ],
   "merchant_map": {{
-    "nazwa_firmy_lowercase": "Kategoria: Podkategoria"
+    "company_name_lowercase": "Category: Subcategory"
   }}
 }}
 
-Zasady:
-- Używaj WYŁĄCZNIE kategorii z poniższej listy, przepisanych znak w znak
-  (odstępy i myślniki też) — inna nazwa = reguła odrzucona:
+Rules:
+- Use ONLY categories from the list below, copied character for character
+  (spaces and dashes included) — any other name means the rule is thrown away:
 {valid_list}
-- Generuj reguły TYLKO dla wydatków – przychody pomijaj
-- Priorytet 1 = bardzo pewna reguła, 2 = prawdopodobna, 3 = możliwa
-- Uwzględnij nazwy merchantów z opisów PŁATNOŚĆ KARTĄ
-- Krótkie, specyficzne wzorce są lepsze niż ogólne
+- Produce rules ONLY for expenses – skip income
+- Priority 1 = very confident rule, 2 = likely, 3 = possible
+- Pick up merchant names from card payment descriptions
+- Short, specific patterns are better than general ones{hint_lines}
 
-Zwróć TYLKO JSON."""
+Return ONLY the JSON."""
 
     raw = llm.complete(prompt, task="learn", system=LEARN_SYSTEM_PROMPT,
                        max_tokens=3000, api_key=api_key)
@@ -883,12 +966,12 @@ def drop_invalid_rules(rules: dict) -> dict:
             if cat in valid_categories():
                 kept[section][key] = cat
             else:
-                print(f"  Odrzucam regułę '{key}' — nieistniejąca kategoria '{cat}'")
+                print(f"  Dropping rule '{key}' — no such category '{cat}'")
     for p in rules.get("patterns", []):
         if p.get("category") in valid_categories():
             kept["patterns"].append(p)
         else:
-            print(f"  Odrzucam wzorzec '{p.get('pattern')}' — nieistniejąca kategoria '{p.get('category')}'")
+            print(f"  Dropping pattern '{p.get('pattern')}' — no such category '{p.get('category')}'")
     return kept
 
 
@@ -914,38 +997,39 @@ def cmd_learn(args):
     # Unlike fetch, learn has nothing to do without a model — writing rules IS
     # the whole command.
     if not llm.configured() and not api_key:
-        print("Brak skonfigurowanego LLM (LLM_PROVIDER / ANTHROPIC_API_KEY) — "
-              "nie ma z czego generować reguł. Pomijam.")
+        print("No LLM configured (LLM_PROVIDER and the API key it needs) — "
+              "nothing to generate rules with. Skipping.")
         sys.exit(0)
 
     corrections_dir = resolve_path(cfg.get("corrections_dir", "Corrections"))
     if not corrections_dir or not corrections_dir.exists():
-        print(f"Brak folderu poprawek: {corrections_dir}")
-        print("Ustaw corrections_dir w config.json lub uruchom: python main.py setup")
+        print(f"No corrections folder: {corrections_dir}")
+        print("Set corrections_dir in config.json or run: python main.py setup")
         sys.exit(1)
 
     csv_files = sorted(corrections_dir.glob("*.csv"))
     if not csv_files:
-        print(f"Brak plików CSV w {corrections_dir}")
-        print("Poprawki pobiera push_actuals.py z aplikacji — uruchom go najpierw.")
+        print(f"No CSV files in {corrections_dir}")
+        print("push_actuals.py pulls the corrections from the app — run it first.")
         sys.exit(0)
 
-    print(f"Znaleziono {len(csv_files)} plik(ów) z poprawkami.\n")
+    print(f"Found {len(csv_files)} file(s) with corrections.\n")
 
     all_transactions = []
     for csv_file in csv_files:
         txs = parse_money_pro_csv(csv_file)
-        print(f"  {csv_file.name}: {len(txs)} transakcji")
+        print(f"  {csv_file.name}: {len(txs)} transactions")
         all_transactions.extend(txs)
 
     if not all_transactions:
-        print("Brak transakcji z kategoriami w plikach.")
+        print("No categorized transactions in those files.")
         sys.exit(0)
 
-    print(f"\nŁącznie: {len(all_transactions)} transakcji.")
-    print("Generuję nowe reguły przez Claude Sonnet...")
+    print(f"\nTotal: {len(all_transactions)} transactions.")
+    print("Asking the model for new rules...")
 
-    new_rules = generate_new_rules(all_transactions, api_key)
+    new_rules = generate_new_rules(all_transactions, api_key,
+                                   market_hints(cfg, "learn_hints"))
     print(f"  → {len(new_rules.get('keywords', {}))} keywords, "
           f"{len(new_rules.get('patterns', []))} patterns, "
           f"{len(new_rules.get('merchant_map', {}))} merchant mappings")
@@ -953,24 +1037,24 @@ def cmd_learn(args):
     existing = load_rules()
     merged   = merge_rules(existing, new_rules)
 
-    print(f"\nPo połączeniu: {len(merged['keywords'])} keywords, "
+    print(f"\nAfter merging: {len(merged['keywords'])} keywords, "
           f"{len(merged['patterns'])} patterns, "
           f"{len(merged['merchant_map'])} merchant mappings")
 
     if args.dry_run:
-        print("\n[dry-run] rules.json nie został zaktualizowany.")
+        print("\n[dry-run] rules.json not updated.")
         return
 
     save_rules(merged)
-    print(f"\nZaktualizowano: {RULES_FILE}")
+    print(f"\nUpdated: {RULES_FILE}")
 
     processed_dir = corrections_dir / "processed"
     processed_dir.mkdir(exist_ok=True)
     for csv_file in csv_files:
         shutil.move(str(csv_file), processed_dir / csv_file.name)
-        print(f"Przeniesiono: {csv_file.name} → processed/")
+        print(f"Moved: {csv_file.name} → processed/")
 
-    print("\nGotowe! Nowe reguły aktywne przy następnym: python main.py sync")
+    print("\nDone! The new rules take effect on the next: python main.py sync")
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
@@ -980,36 +1064,36 @@ def main():
 
     ok, missing = check_config_ready()
     if not ok:
-        print("Brak konfiguracji:")
+        print("Configuration incomplete:")
         for m in missing:
             print(f"  • {m}")
-        print("\nUruchom: python main.py setup\n")
+        print("\nRun: python main.py setup\n")
 
     parser = argparse.ArgumentParser(
         description="money-badger sync – bank → categorize → budget app",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""Komendy:
-  setup          – wizard konfiguracji (pierwsze uruchomienie)
-  fetch          – pobierz transakcje przez Enable Banking → CSV
-  fetch-setup    – jednorazowa autoryzacja kont w Enable Banking
-  fetch-balances – pobierz salda kont i wyślij do appki
-  learn          – zaktualizuj rules.json z poprawek zrobionych w appce""",
+        epilog="""Commands:
+  setup          – configuration wizard (first run)
+  fetch          – pull transactions through Enable Banking → CSV
+  fetch-setup    – one-time account authorization in Enable Banking
+  fetch-balances – pull account balances and compare them with the app
+  learn          – update rules.json from corrections made in the app""",
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("setup", help="wizard konfiguracji")
+    sub.add_parser("setup", help="configuration wizard")
 
-    p_learn = sub.add_parser("learn", help="zaktualizuj reguły z poprawek zrobionych w aplikacji")
-    p_learn.add_argument("--dry-run", action="store_true", help="nie zapisuj rules.json")
+    p_learn = sub.add_parser("learn", help="update the rules from corrections made in the app")
+    p_learn.add_argument("--dry-run", action="store_true", help="do not write rules.json")
 
-    p_fetch = sub.add_parser("fetch", help="pobierz transakcje przez Enable Banking API")
-    p_fetch.add_argument("--days", type=int, help="ile dni wstecz (domyślnie z config.json lub 30)")
-    p_fetch.add_argument("--dry-run", action="store_true", help="nie zapisuj plików")
+    p_fetch = sub.add_parser("fetch", help="pull transactions through the Enable Banking API")
+    p_fetch.add_argument("--days", type=int, help="how many days back (default: config.json, or 30)")
+    p_fetch.add_argument("--dry-run", action="store_true", help="do not write any files")
 
-    p_fetch_setup = sub.add_parser("fetch-setup", help="jednorazowa autoryzacja kont w Enable Banking")
-    p_fetch_setup.add_argument("ibans", nargs="*", help="IBANy do autoryzacji (domyślnie z config.json)")
+    p_fetch_setup = sub.add_parser("fetch-setup", help="one-time account authorization in Enable Banking")
+    p_fetch_setup.add_argument("ibans", nargs="*", help="IBANs to authorize (default: from config.json)")
 
-    sub.add_parser("fetch-balances", help="pobierz salda kont bankowych i wyślij do aplikacji")
+    sub.add_parser("fetch-balances", help="pull bank balances and compare them with the app")
 
     args = parser.parse_args()
 

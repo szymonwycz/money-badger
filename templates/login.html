@@ -23,8 +23,11 @@
 <div class="login-wrap">
   <form class="login-card" method="post" autocomplete="on">
     <img src="/static/badger.png?v={{ v }}" alt="Money Badger">
+    <input type="text" name="username" placeholder="Username"
+           autocomplete="username" autocapitalize="none" autocorrect="off"
+           spellcheck="false" autofocus required>
     <input type="password" name="password" placeholder="Password"
-           autocomplete="current-password" autofocus required>
+           autocomplete="current-password" required>
     <div class="login-error">{{ error or '' }}</div>
     <button type="submit" class="btn btn-blue">Sign in</button>
   </form>

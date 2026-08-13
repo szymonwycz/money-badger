@@ -63,4 +63,4 @@ if __name__ == "__main__":
     test_mixed_session_and_quota_failures_skips_retry()
     test_unknown_failure_reason_allows_retry()
     test_missing_summary_file_allows_retry()
-    print("OK — wszystkie testy master_pi retry-skip przeszły")
+    print("OK — all master_pi retry-skip tests passed")

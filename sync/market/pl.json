@@ -1,0 +1,8 @@
+{
+  "_comment": "Wording Polish banks put on statement lines. Select it with \"market\": \"pl\" in config.json. A key this file does not define means no hints for that prompt, which is a working setup, not an error — copy this file to <code>.json for another country.",
+
+  "learn_hints": [
+    "Polish statements prefix card purchases with \"PŁATNOŚĆ KARTĄ\" or \"PRZELEW KARTĄ\" followed by the merchant name — build the rule from the merchant name that follows.",
+    "Bank boilerplate such as \"PŁATNOŚĆ KARTĄ\", \"WYPŁATA BLIK\" or \"DOP. VISA\" shows up on thousands of unrelated rows — never turn it into a keyword or a pattern."
+  ]
+}

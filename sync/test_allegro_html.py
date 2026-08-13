@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from allegro_match import extract_plaintext, parse_allegro_email
+from order_match import extract_plaintext, parse_allegro_email
 
 # Minimal reproduction of a direct (non-forwarded) Allegro notification: only
 # text/html, no text/plain — this is the case that used to be silently dropped.
@@ -71,4 +71,4 @@ if __name__ == "__main__":
     test_extract_plaintext_falls_back_to_html()
     test_parse_allegro_email_reads_html_fallback_text()
     test_text_plain_part_still_wins_when_present()
-    print("OK — wszystkie testy html fallback przeszły")
+    print("OK — all html fallback tests passed")

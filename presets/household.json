@@ -1,0 +1,187 @@
+{
+  "name": "Household",
+  "description": "A general two-adult household. Good starting point if none of the others fit — every category is editable afterwards.",
+  "categories": [
+    {
+      "name": "Housing",
+      "children": [
+        "Rent / Mortgage",
+        "Repairs & Maintenance",
+        "Furniture",
+        "Small accessories",
+        "Tools & Materials",
+        "Garden",
+        "Insurance",
+        "Other"
+      ]
+    },
+    {
+      "name": "Utilities",
+      "children": [
+        "Electricity",
+        "Gas",
+        "Water",
+        "Heating",
+        "Garbage",
+        "Internet",
+        "Phone"
+      ]
+    },
+    {
+      "name": "Groceries",
+      "children": []
+    },
+    {
+      "name": "Dining",
+      "children": []
+    },
+    {
+      "name": "Transport",
+      "children": [
+        "Fuel",
+        "Public transport",
+        "Parking",
+        "Insurance",
+        "Maintenance",
+        "Inspections",
+        "Leasing",
+        "Other"
+      ]
+    },
+    {
+      "name": "Health",
+      "children": [
+        "Doctor",
+        "Pharmacy",
+        "Dental",
+        "Therapy",
+        "Insurance",
+        "Other"
+      ]
+    },
+    {
+      "name": "Children",
+      "children": [
+        "Childcare",
+        "School",
+        "Clothing",
+        "Activities",
+        "Health care",
+        "Other"
+      ]
+    },
+    {
+      "name": "Personal",
+      "children": [
+        "Clothing",
+        "Hair & Beauty",
+        "Cosmetics",
+        "Sport",
+        "Coffee",
+        "Other"
+      ]
+    },
+    {
+      "name": "Subscriptions",
+      "children": [
+        "Streaming",
+        "Software",
+        "Music",
+        "News",
+        "Other"
+      ]
+    },
+    {
+      "name": "Fun",
+      "children": [
+        "Hobby",
+        "Books",
+        "Cinema",
+        "Games",
+        "Party",
+        "Sport events",
+        "Other"
+      ]
+    },
+    {
+      "name": "Pets",
+      "children": [
+        "Vet",
+        "Food",
+        "Other"
+      ]
+    },
+    {
+      "name": "Travel",
+      "children": [
+        "Transport",
+        "Accommodation",
+        "Food",
+        "Other"
+      ]
+    },
+    {
+      "name": "Gifts",
+      "children": []
+    },
+    {
+      "name": "Taxes",
+      "children": [
+        "Income tax",
+        "VAT",
+        "Property tax",
+        "Other"
+      ]
+    },
+    {
+      "name": "Debt",
+      "children": [
+        "Mortgage overpayment",
+        "Loans",
+        "Family",
+        "Other"
+      ]
+    },
+    {
+      "name": "Savings",
+      "children": []
+    },
+    {
+      "name": "Investment",
+      "children": []
+    },
+    {
+      "name": "Misc",
+      "children": []
+    }
+  ],
+  "income_categories": [
+    "Salary",
+    "Partner salary",
+    "Bonus",
+    "Benefits",
+    "Gifts",
+    "Refunds",
+    "Loans",
+    "From assets",
+    "CHECK ME"
+  ],
+  "accounts": [
+    [
+      "Main account",
+      "bank"
+    ],
+    [
+      "Partner account",
+      "bank"
+    ],
+    [
+      "Cash",
+      "cash"
+    ],
+    [
+      "Savings",
+      "asset"
+    ]
+  ]
+}

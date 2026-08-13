@@ -37,7 +37,7 @@ Every other app uses bottom underlines or background fills. Home Badger uses a t
 
 ## Token System
 
-Source file: `~/Projects/home-badger/static/design_tokens.css (on the Pi)`  
+Source file: `static/design_tokens.css`  
 Imported at the top of `style.css` via `@import url('./design_tokens.css')`.
 
 ### Colors
@@ -403,7 +403,7 @@ Only on uppercase labels: `0.8px`. Never on numeric values. Exception: `#month-l
 ## File Map
 
 ```
-~/Projects/home-badger/  (on the Pi — the only working copy)
+money-badger/
   static/
     design_tokens.css   ← CSS custom properties (source of truth)
     style.css           ← imports design_tokens.css, all component styles

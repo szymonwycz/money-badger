@@ -112,19 +112,35 @@ def _write_diff_log(root, day, name, diff):
                     f"(różnica {diff:+.2f} zł — sprawdź)\n")
 
 
-def test_diff_parser_still_reads_logs_from_before_the_rename():
-    """Balance-check logs live for 90 days, so both wordings must parse."""
-    old = ("[00:00:00]   ⚠ Main: budget.lan=100.00 PLN, bank=200.00 PLN "
-           "(różnica +100.00 zł — sprawdź)")
-    new = ("[00:00:00]   ⚠ Main: app=100.00 PLN, bank=200.00 PLN "
-           "(różnica +100.00 zł — sprawdź)")
-    for line in (old, new):
+def test_diff_parser_reads_every_wording_this_log_has_ever_had():
+    """Balance-check logs live for 90 days and the line has been rewritten twice:
+    budget.lan -> app, and Polish -> English with a configurable currency. Every
+    shape must still parse, or drift detection goes quiet without failing a test.
+    """
+    lines = [
+        # oldest: pre-rename, Polish, hardcoded PLN
+        "[00:00:00]   ⚠ Main: budget.lan=100.00 PLN, bank=200.00 PLN "
+        "(różnica +100.00 zł — sprawdź)",
+        # Polish, after the budget.lan -> app rename
+        "[00:00:00]   ⚠ Main: app=100.00 PLN, bank=200.00 PLN "
+        "(różnica +100.00 zł — sprawdź)",
+        # current: English, currency from settings
+        "[00:00:00]   ⚠ Main: app=100.00 PLN, bank=200.00 PLN "
+        "(difference +100.00 PLN — check for missing or duplicated transactions)",
+        # a household running in euro
+        "[00:00:00]   ⚠ Main: app=100.00 €, bank=200.00 € "
+        "(difference +100.00 € — check for missing or duplicated transactions)",
+        # app unreachable at sync time: currency() returns "" and the symbol is absent
+        "[00:00:00]   ⚠ Main: app=100.00 , bank=200.00  "
+        "(difference +100.00  — check for missing or duplicated transactions)",
+    ]
+    for line in lines:
         m = self_checker.DIFF_RE.search(line)
         assert m and m.group("name") == "Main" and float(m.group("diff")) == 100.0, line
 
 
 def test_balance_discrepancy_uses_latest_weekly_check_only():
-    """Balance check is weekly now (home-badger-balance-check.timer) — only one
+    """Balance check is weekly now (money-badger-balance-check.timer) — only one
     sample exists between runs, so the check must look at the MOST RECENT
     sync_*.log with a diff line and judge it against tolerance alone, not
     compare it to older samples (there's no day-to-day trend at weekly cadence)."""
@@ -186,7 +202,7 @@ def test_orphan_raw_pulls_flags_missing_commit():
     ]}
     f = root / "raw_pulls" / "1111_2026-07-01_2026-07-01_20260701T000000.json"
     f.write_text(json.dumps(raw))
-    old_time = time.time() - 86400  # 1 dzień temu — starsze niż próg 6h
+    old_time = time.time() - 86400  # a day ago — older than the 6h threshold
     os.utime(f, (old_time, old_time))
     findings = self_checker.check_orphan_raw_pulls(cfg)
     assert any("Testowe" in x for x in findings), findings
@@ -238,7 +254,7 @@ def test_allegro_backlog_only_checks_last_run_of_the_day():
     # An earlier ad-hoc/manual run failed (bad IMAP creds from a botched debug
     # session), but the LAST run of the day was clean — must not flag, or one
     # bad manual invocation would falsely taint the whole day.
-    _write_run(log_path, 1, "[allegro] Błąd IMAP: bad creds")
+    _write_run(log_path, 1, "[orders] IMAP error: bad creds")
     _write_run(log_path, 2, "[allegro] OK, matched 2 transactions")
     findings = self_checker.check_allegro_backlog()
     assert findings == [], findings
@@ -248,7 +264,7 @@ def test_allegro_backlog_only_checks_last_run_of_the_day():
     _write_run(root2 / "logs" / f"allegro_match_{yesterday.isoformat()}.log", 0, "[allegro] OK")
     log_path2 = root2 / "logs" / f"allegro_match_{today.isoformat()}.log"
     _write_run(log_path2, 1, "[allegro] OK, matched 2 transactions")
-    _write_run(log_path2, 2, "[allegro] Błąd IMAP: bad creds")
+    _write_run(log_path2, 2, "[orders] IMAP error: bad creds")
     findings = self_checker.check_allegro_backlog()
     assert len(findings) >= 1, findings
 
@@ -265,4 +281,4 @@ if __name__ == "__main__":
     test_orphan_raw_pulls_flags_missing_commit()
     test_checkme_backlog_respects_ignored_and_type_filters()
     test_allegro_backlog_only_checks_last_run_of_the_day()
-    print("OK — wszystkie testy self_checker przeszły")
+    print("OK — all self_checker tests passed")

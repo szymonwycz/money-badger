@@ -1,14 +1,14 @@
-"""Nocny self-checker Money Badger — audytuje już pobrane dane (SQLite,
-logi, .bank_sync_state.json, raw_pulls/) bez ani jednego wywołania Enable
+"""The nightly self-checker — audits data that has already been fetched (SQLite,
+logs, .bank_sync_state.json, raw_pulls/) without a single call to Enable
 Banking. Nigdy nie importuje banks.enable_banking — to gwarancja przez
-konstrukcję, nie tylko konwencję (dzienny limit ASPSP jest dzielony ze
-zwykłym syncem — audyt nie może zjeść limitu, którego potrzebuje sync).
+by construction, not by convention: the daily ASPSP quota is shared with the
+regular sync, and the audit must not spend a call the sync needs.
 
-Report-only: nic nie naprawia automatycznie. Każda naprawa, jaka się dotąd
-zdarzyła, wymagała ludzkiej decyzji — audyt tylko wskazuje, gdzie patrzeć.
+Report-only: it fixes nothing on its own. Every repair so far has needed a
+human decision — the audit just says where to look.
 
-Treść znalezisk (i wiadomość Telegram) jest po angielsku — cała reszta
-appki jest po angielsku, tylko konsolowe printy/logi zostają polskie.
+Findings are phrased for someone reading them on a phone at breakfast, so they
+name the account and the number, not the internal check that produced them.
 """
 import json
 import re
@@ -28,7 +28,7 @@ from logging_setup import start_logging  # noqa: E402
 from notify_telegram import send_telegram  # noqa: E402
 
 DB_PATH = ROOT_DIR / "budget.db"
-REPORT_FILE = ROOT_DIR / ".self_checker_report.txt"  # czeka na wysyłkę o 08:30, patrz send_self_checker_report.py
+REPORT_FILE = ROOT_DIR / ".self_checker_report.txt"  # waits for the morning send, see send_self_checker_report.py
 KNOWN_ISSUES_FILE = ROOT_DIR / "known_issues.json"  # {"match": "...", "note": "...", "added": "YYYY-MM-DD"}[]
 
 STALE_FETCH_DAYS = 2
@@ -40,9 +40,12 @@ RAW_PULL_MIN_AGE_SECONDS = 6 * 3600
 
 # "budget.lan" was the old wording; logs written before the rename are kept for
 # 90 days, so both spellings have to parse.
+# The currency is configurable and the wording was Polish until 2026-08-13, so
+# both spellings have to parse: logs are kept for 90 days and a balance check
+# that silently stops matching is worse than none at all.
 DIFF_RE = re.compile(
-    r"⚠ (?P<name>.+?): (?:app|budget\.lan)=([\d.]+) PLN, bank=([\d.]+) PLN "
-    r"\(różnica (?P<diff>[+-][\d.]+) zł"
+    r"⚠ (?P<name>.+?): (?:app|budget\.lan)=([\d.]+)\D+ bank=([\d.]+)\D+"
+    r"\((?:difference|różnica) (?P<diff>[+-][\d.]+)"
 )
 
 
@@ -87,8 +90,8 @@ def check_stale_fetch(cfg: dict) -> list[str]:
 
 
 def _last_diff_per_account(log_path: Path) -> dict[str, float]:
-    """Gdyby ktoś ręcznie odpalił fetch-balances więcej niż raz danego dnia,
-    bierzemy ostatnie wystąpienie per konto, czyli finalny stan dnia."""
+    """If someone ran fetch-balances by hand more than once that day, take the
+    last entry per account — the day's final word."""
     diffs = {}
     if not log_path.exists():
         return diffs
@@ -100,7 +103,7 @@ def _last_diff_per_account(log_path: Path) -> dict[str, float]:
 
 
 def check_balance_discrepancy() -> list[str]:
-    """fetch-balances now runs weekly (Saturday 02:30, home-badger-balance-check.timer)
+    """fetch-balances now runs weekly (Saturday 02:30, money-badger-balance-check.timer)
     instead of on every sync/watchdog hop — it's just a drift check against the app's
     own transaction-computed balance, never the source of truth for what's displayed, so
     daily sampling was never actually needed. One sample a week means there's no day-to-day
@@ -113,11 +116,11 @@ def check_balance_discrepancy() -> list[str]:
         diffs = _last_diff_per_account(ROOT_DIR / "logs" / f"sync_{d.isoformat()}.log")
         if diffs:
             return [
-                f"{name}: {diff:+.2f} zł diff from bank ({d.isoformat()} check)"
+                f"{name}: {diff:+.2f} diff from bank ({d.isoformat()} check)"
                 for name, diff in diffs.items()
                 if abs(diff) >= BALANCE_DIFF_TOLERANCE
             ]
-    return [f"no balance check found in the last {BALANCE_CHECK_LOOKBACK_DAYS} days — home-badger-balance-check.timer broken?"]
+    return [f"no balance check found in the last {BALANCE_CHECK_LOOKBACK_DAYS} days — money-badger-balance-check.timer broken?"]
 
 
 def check_duplicate_income_balance_adjust() -> list[str]:
@@ -134,7 +137,7 @@ def check_duplicate_income_balance_adjust() -> list[str]:
         """).fetchall()
     finally:
         con.close()
-    return [f"{acc} {d} {amt:+.2f} zł — {types}" for acc, d, amt, types in rows]
+    return [f"{acc} {d} {amt:+.2f} — {types}" for acc, d, amt, types in rows]
 
 
 def check_orphan_raw_pulls(cfg: dict) -> list[str]:
@@ -148,7 +151,7 @@ def check_orphan_raw_pulls(cfg: dict) -> list[str]:
     try:
         for f in sorted(raw_pulls_dir.glob("*.json")):
             if f.stat().st_mtime > cutoff:
-                continue  # może jeszcze czekać na commit tego samego dnia
+                continue  # may still be waiting for a commit later the same day
             try:
                 bare_iban, date_from, date_to, _ts = f.stem.split("_")
             except ValueError:
@@ -161,8 +164,8 @@ def check_orphan_raw_pulls(cfg: dict) -> list[str]:
             raw_txs = body.get("transactions") or []
             # Ta sama konwersja znaku co EnableBankingFetcher._convert_tx,
             # celowo zduplikowana (nie importujemy banks.enable_banking tutaj
-            # pod żadnym pozorem, żeby żadna ścieżka audytu nie mogła
-            # przypadkiem pociągnąć za sobą kod wywołujący EB).
+            # under any circumstances, so no audit path can accidentally drag in
+            # code that calls the bank).
             nonzero = [
                 t for t in raw_txs
                 if float(((t.get("transaction_amount") or {}).get("amount", 0)) or 0) != 0
@@ -202,10 +205,10 @@ def check_allegro_backlog() -> list[str]:
         # Otherwise one bad ad-hoc invocation early in the day would keep
         # flagging for the rest of the day even after a clean scheduled run.
         last_run = text.rsplit("START allegro_match", 1)[-1]
-        if "Błąd IMAP" in last_run:
+        if "IMAP error" in last_run:
             findings.append(f"allegro_match {d.isoformat()}: IMAP error")
-        elif "Brak ANTHROPIC_API_KEY" in last_run:
-            findings.append(f"allegro_match {d.isoformat()}: missing ANTHROPIC_API_KEY")
+        elif "no LLM configured" in last_run:
+            findings.append(f"allegro_match {d.isoformat()}: no LLM configured")
     return list(dict.fromkeys(findings))
 
 
@@ -272,13 +275,13 @@ def main():
 
     if lines:
         msg = f"🔍 Money Badger — nightly audit ({date.today().isoformat()})\n\n" + "\n".join(lines)
-        # Nie wysyłamy od razu w nocy — send_self_checker_report.py (timer 08:30)
-        # odczyta ten plik i wyśle rano, żeby nie budzić powiadomieniem o 23:45.
+        # Not sent from here: send_self_checker_report.py reads this file on its
+        # own morning timer, so a nightly audit never buzzes anyone awake.
         REPORT_FILE.write_text(msg, encoding="utf-8")
         print(f"\n{len(lines)} finding(s) — report saved, sending at 08:30.")
     else:
         if REPORT_FILE.exists():
-            REPORT_FILE.unlink()  # wczorajszy problem sam się rozwiązał — nie wysyłaj nieaktualnego raportu
+            REPORT_FILE.unlink()  # yesterday's problem resolved itself — don't send a stale report
         if suppressed:
             print("\nAll clear except known/suppressed issues — no report.")
         else:
@@ -289,7 +292,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        # Cisza od self-checkera, który sam padł, jest nie do odróżnienia od
-        # czystej nocy — to jedyny przypadek, który zawsze powiadamia, i to od razu.
+        # Silence from a self-checker that crashed looks exactly like a clean
+        # night, so this is the one case that always notifies, immediately.
         send_telegram(f"❌ Money Badger self_checker crashed: {e!r}")
         raise

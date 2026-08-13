@@ -88,6 +88,16 @@ echo "  A password protects every page and the whole transaction history."
 echo "  Leave it empty only if nothing but your own machine can reach this port."
 PASSWORD=$(ask_secret "  Password (empty = no login)")
 
+ADMIN_USER="admin"
+if [ -n "$PASSWORD" ]; then
+    echo
+    echo "  This becomes your account. You can add accounts for other people"
+    echo "  later from the ACCOUNT tab — everyone shares the same budget."
+    ADMIN_USER=$(ask "  Your username" "admin")
+    [[ "$ADMIN_USER" =~ ^[A-Za-z0-9._-]{2,32}$ ]] \
+        || die "Username must be 2-32 characters: letters, digits, dot, dash or underscore."
+fi
+
 SYNC_TIME="10:30"; SYNC_RUNS=4
 if [ "$VARIANT" != "1" ]; then
     echo
@@ -105,18 +115,59 @@ if [ "$VARIANT" != "1" ]; then
     [[ "$SYNC_RUNS" =~ ^[1-5]$ ]] || die "Pick a number from 1 to 5."
 fi
 
-LLM_PROVIDER=""; ANTHROPIC_API_KEY=""; LLM_BASE_URL=""; LLM_MODEL=""
+LLM_PROVIDER=""; API_KEY=""; KEY_VAR=""; LLM_BASE_URL=""; LLM_MODEL=""
 if [ "$VARIANT" = "3" ]; then
     echo
-    echo "  1) Anthropic API  — needs a key, costs a few cents a month"
-    echo "  2) Local model    — Ollama, LM Studio or anything OpenAI-compatible"
-    if [ "$(ask "  Which" "1")" = "2" ]; then
-        LLM_PROVIDER="openai"
-        LLM_BASE_URL=$(ask "  Base URL" "http://127.0.0.1:11434/v1")
-        LLM_MODEL=$(ask "  Model" "qwen3:30b")
-    else
-        LLM_PROVIDER="anthropic"
-        ANTHROPIC_API_KEY=$(ask_secret "  ANTHROPIC_API_KEY")
+    echo "  Hosted providers cost a few cents a month and need an API key."
+    echo "  A local model costs nothing and never sends your transactions anywhere."
+    echo
+    echo "  1) Anthropic (Claude)   2) OpenAI (GPT)      3) DeepSeek"
+    echo "  4) Kimi (Moonshot)      5) Google Gemini     6) xAI (Grok)"
+    echo "  7) Local model — Ollama, LM Studio, anything OpenAI-compatible"
+    LLM_CHOICE=$(ask "  Which" "1")
+
+    case "$LLM_CHOICE" in
+        1) LLM_PROVIDER="anthropic"; KEY_VAR="ANTHROPIC_API_KEY" ;;
+        2) LLM_PROVIDER="openai";    KEY_VAR="OPENAI_API_KEY" ;;
+        3) LLM_PROVIDER="deepseek";  KEY_VAR="DEEPSEEK_API_KEY" ;;
+        4) LLM_PROVIDER="moonshot";  KEY_VAR="MOONSHOT_API_KEY" ;;
+        5) LLM_PROVIDER="gemini";    KEY_VAR="GEMINI_API_KEY" ;;
+        6) LLM_PROVIDER="xai";       KEY_VAR="XAI_API_KEY" ;;
+        7) LLM_PROVIDER="openai"
+           LLM_BASE_URL=$(ask "  Base URL" "http://127.0.0.1:11434/v1")
+           LLM_MODEL=$(ask "  Model" "qwen3:30b") ;;
+        *) die "Pick a number from 1 to 7." ;;
+    esac
+
+    # Hosted providers: pick the model from what the account can actually see,
+    # so nothing here goes stale when the provider renames or retires one.
+    # sync/llm.py is stdlib-only on purpose, so this runs before the venv exists.
+    if [ -n "$KEY_VAR" ]; then
+        API_KEY=$(ask_secret "  $KEY_VAR")
+        if [ -n "$API_KEY" ]; then
+            echo "  Asking $LLM_PROVIDER which models this key can use..."
+            if MODELS=$(env LLM_PROVIDER="$LLM_PROVIDER" "$KEY_VAR=$API_KEY" \
+                        python3 "$APP_DIR/sync/llm.py" --models 2>&1); then
+                echo "$MODELS" | nl -w4 -s') '
+                echo
+                echo "  That is everything the provider sells, embeddings and all."
+                echo "  Cheap and fast is usually right — this runs on every unmatched"
+                echo "  transaction. Enter empty to decide later in .env."
+                PICK=$(ask "  Which model (number, or paste an id)" "")
+                if [[ "$PICK" =~ ^[0-9]+$ ]]; then
+                    LLM_MODEL=$(echo "$MODELS" | sed -n "${PICK}p")
+                    [ -n "$LLM_MODEL" ] || die "There is no model $PICK in that list."
+                    echo "  Using $LLM_MODEL"
+                else
+                    LLM_MODEL="$PICK"
+                fi
+            else
+                warn "  Could not list models: $MODELS"
+                LLM_MODEL=$(ask "  Model id (empty = set LLM_MODEL in .env later)" "")
+            fi
+        else
+            warn "  No key given — categorization stays off until you set it in .env."
+        fi
     fi
 fi
 
@@ -143,6 +194,74 @@ if [ "$VARIANT" != "1" ]; then
     fi
 fi
 
+MAIL_ADDRESS=""; MAIL_PASSWORD=""; MAIL_IMAP_HOST=""; MAIL_IMAP_PORT=""
+SHOPS=""; LOCAL_CURRENCY=""; FX_PAIRS=""
+if [ "$VARIANT" != "1" ]; then
+    echo
+    echo "  Money Badger can read order confirmations from a mailbox and put the"
+    echo "  shop and the items into the matching bank transaction, so a card charge"
+    echo "  stops being an anonymous number."
+    if [ "$(ask "  Match orders from email? (y/n)" "n")" = "y" ]; then
+        echo
+        echo "  Use an app password if your provider offers one — this is stored"
+        echo "  in plain text in .env, like every other credential here."
+        MAIL_ADDRESS=$(ask "  Mailbox address" "")
+        MAIL_PASSWORD=$(ask_secret "  Mailbox password")
+        echo
+        echo "  Implicit TLS only (the usual port 993). A server that only speaks"
+        echo "  STARTTLS will not work."
+        MAIL_IMAP_HOST=$(ask "  IMAP server" "imap.gmail.com")
+        MAIL_IMAP_PORT=$(ask "  IMAP port" "993")
+
+        if [ -z "$MAIL_ADDRESS" ] || [ -z "$MAIL_PASSWORD" ]; then
+            warn "  Address and password are both needed — order matching stays off."
+            MAIL_ADDRESS=""; MAIL_PASSWORD=""
+        else
+            echo
+            echo "  Each shop needs its own folder in that mailbox, named exactly"
+            echo "  after the shop. On Gmail that is a filter applying a label."
+            SHOPS=$(ask "  Which shops (comma-separated)" "Allegro")
+            case "$SHOPS" in
+                *,*|*[Aa]mazon*|*[Ee]bay*|*[Tt]emu*|*[Aa]li*)
+                    echo
+                    echo "  Foreign orders need a rough exchange rate — your bank converts"
+                    echo "  at its own rate, so this only has to be close enough to"
+                    echo "  recognise the charge. Leave one empty to review those by hand."
+                    LOCAL_CURRENCY=$(ask "  Your account currency (ISO code)" "PLN")
+                    for CUR in EUR USD; do
+                        RATE=$(ask "  Approximate $CUR -> $LOCAL_CURRENCY rate" "")
+                        [ -n "$RATE" ] && FX_PAIRS="$FX_PAIRS$CUR=$RATE "
+                    done ;;
+            esac
+        fi
+    fi
+fi
+
+MARKET=""
+if [ "$VARIANT" = "3" ]; then
+    PACKS=$(ls "$APP_DIR"/sync/market/*.json 2>/dev/null | xargs -n1 basename 2>/dev/null | sed 's/\.json$//' | tr '\n' ' ')
+    if [ -n "$PACKS" ]; then
+        echo
+        echo "  A market pack tells the categorizer what your bank's wording looks"
+        echo "  like locally. Without one it still works, just with fewer hints."
+        echo "  Available: $PACKS"
+        MARKET=$(ask "  Market pack (empty = none)" "")
+    fi
+fi
+
+B2B_VAT=""; B2B_TAX=""
+echo
+echo "  If you invoice as a business, the calculator tab can set aside VAT and"
+echo "  income tax from what you bill. Rates are editable in the app afterwards."
+if [ "$(ask "  Do you work B2B / self-employed? (y/n)" "n")" = "y" ]; then
+    B2B_VAT=$(ask "  VAT rate in percent (empty = skip)" "")
+    B2B_TAX=$(ask "  Income tax rate in percent (empty = skip)" "")
+    for RATE in "$B2B_VAT" "$B2B_TAX"; do
+        [ -z "$RATE" ] || [[ "$RATE" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+            || die "Rates are plain numbers, e.g. 23 or 8.5 — got '$RATE'."
+    done
+fi
+
 # ── 3. virtualenv ─────────────────────────────────────────────────────────────
 
 say "Installing dependencies"
@@ -153,7 +272,7 @@ say "Installing dependencies"
 echo "  core: flask, gunicorn"
 
 if [ "$VARIANT" != "1" ]; then
-    if [ "$LLM_PROVIDER" = "openai" ] || [ "$VARIANT" = "2" ]; then
+    if [ "$LLM_PROVIDER" != "anthropic" ]; then
         # The Anthropic SDK is only needed for the hosted provider.
         "$APP_DIR/venv/bin/pip" install --quiet requests
         echo "  sync: requests"
@@ -182,17 +301,23 @@ else
     cat > "$APP_DIR/.env" <<EOF
 # Written by install.sh. See .env.example for everything else you can set.
 MB_PASSWORD_HASH=$PASSWORD_HASH
+MB_ADMIN_USER=$ADMIN_USER
 SECRET_KEY=$SECRET_KEY
 MB_API_TOKEN=$API_TOKEN
 BUDGET_URL=http://127.0.0.1:$PORT
 
 LLM_PROVIDER=$LLM_PROVIDER
-ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+${KEY_VAR:-ANTHROPIC_API_KEY}=$API_KEY
 LLM_BASE_URL=$LLM_BASE_URL
 LLM_MODEL=$LLM_MODEL
 
 TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID=$TELEGRAM_CHAT_ID
+
+MAIL_ADDRESS=$MAIL_ADDRESS
+MAIL_PASSWORD=$MAIL_PASSWORD
+MAIL_IMAP_HOST=$MAIL_IMAP_HOST
+MAIL_IMAP_PORT=$MAIL_IMAP_PORT
 EOF
     umask 022
     echo "  .env written (mode 600)"
@@ -211,6 +336,65 @@ fi
 if [ "$VARIANT" != "1" ] && [ ! -f "$APP_DIR/sync/config.json" ]; then
     cp "$APP_DIR/sync/config.example.json" "$APP_DIR/sync/config.json"
     echo "  sync/config.json created from the example — edit it before the first fetch"
+
+    # Patched as JSON, not appended as text, so a hand-edited file survives.
+    if [ -n "$SHOPS" ] || [ -n "$MARKET" ]; then
+        SHOPS="$SHOPS" MARKET="$MARKET" LOCAL_CURRENCY="$LOCAL_CURRENCY" \
+        FX_PAIRS="$FX_PAIRS" CFG="$APP_DIR/sync/config.json" python3 - <<'PY'
+import json, os
+
+path = os.environ['CFG']
+cfg = json.load(open(path, encoding='utf-8'))
+
+if os.environ.get('MARKET'):
+    cfg['market'] = os.environ['MARKET']
+
+shops = [s.strip() for s in os.environ.get('SHOPS', '').split(',') if s.strip()]
+if shops:
+    block = {'shops': {s: {'folder': s} for s in shops}}
+    rates = {}
+    for pair in os.environ.get('FX_PAIRS', '').split():
+        cur, _, rate = pair.partition('=')
+        try:
+            rates[cur] = float(rate)
+        except ValueError:
+            pass
+    if rates:
+        block['local_currency'] = os.environ.get('LOCAL_CURRENCY') or 'PLN'
+        block['fx_rates'] = rates
+        block['fx_tolerance_pct'] = 5
+    cfg['order_matching'] = block
+
+json.dump(cfg, open(path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+open(path, 'a', encoding='utf-8').write('\n')
+PY
+        echo "  sync/config.json: order matching and market pack filled in"
+    fi
+fi
+
+# The calculator's rates live in the database, which the app creates on first
+# run — so build it here and seed them, rather than making the user retype
+# numbers they already gave us.
+if [ -n "$B2B_VAT" ] || [ -n "$B2B_TAX" ]; then
+    B2B_VAT="$B2B_VAT" B2B_TAX="$B2B_TAX" APP_DIR="$APP_DIR" \
+    "$APP_DIR/venv/bin/python" - <<'PY'
+import os, sys
+sys.path.insert(0, os.environ['APP_DIR'])
+import migrations, sqlite3
+
+db_path = os.path.join(os.environ['APP_DIR'], 'budget.db')
+migrations.migrate(db_path)
+db = sqlite3.connect(db_path)
+rows = [('calc.enabled', '1')]
+for env_key, setting in (('B2B_VAT', 'calc.vat_rate'), ('B2B_TAX', 'calc.tax_rate')):
+    value = os.environ.get(env_key, '').strip()
+    if value:
+        rows.append((setting, str(float(value) / 100)))
+db.executemany('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', rows)
+db.commit()
+db.close()
+PY
+    echo "  calculator seeded with your VAT and income tax rates"
 fi
 
 # ── 5. service ────────────────────────────────────────────────────────────────
@@ -271,3 +455,4 @@ fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 127.0.0.1)
 say "Done — open http://${IP:-127.0.0.1}:$PORT/setup to choose your categories and accounts."
+[ -n "$PASSWORD" ] && echo "Sign in as $ADMIN_USER."

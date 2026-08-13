@@ -64,7 +64,7 @@ def main():
     if db.execute('SELECT 1 FROM transactions LIMIT 1').fetchone():
         sys.exit(f'{DB} already has transactions — refusing to add demo data on top.')
 
-    presets.apply_preset(db, presets.load_preset('household-en'), accounts=ACCOUNTS)
+    presets.apply_preset(db, presets.load_preset('household'), accounts=ACCOUNTS)
     for key, value in (('currency', '€'), ('locale', 'en-IE')):
         db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
 

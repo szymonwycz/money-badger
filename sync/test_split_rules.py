@@ -103,4 +103,4 @@ if __name__ == "__main__":
     test_no_rules_configured_is_a_passthrough()
     test_splits_even_when_not_flagged_as_transfer()
     test_incoming_transfer_is_never_split()
-    print("OK — wszystkie testy split_transactions przeszły")
+    print("OK — all split_transactions tests passed")

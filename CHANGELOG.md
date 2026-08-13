@@ -136,7 +136,7 @@ release anyone else can install. Existing installs upgrade in place; migrations
 ## 1.1 — 2026-07-02/03 · Pipeline on the Pi + computed balances
 
 - Bank fetch/categorize/push pipeline moved from the Mac to the Pi
-  (`home-badger-sync.timer`, daily 10:30, watchdog retries).
+  (`money-badger-sync.timer`, daily 10:30, watchdog retries).
 - Account balances became *computed*: checkpoint + transactions since anchor;
   Enable Banking balance fetch is warn-only.
 - Mixed date formats normalized to ISO; flexible date parsing on write.

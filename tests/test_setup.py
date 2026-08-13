@@ -52,7 +52,7 @@ def test_setup_page_renders(client):
 
 
 def test_preset_endpoint_returns_the_tree(client):
-    data = client.get('/api/setup/preset/household-en').get_json()
+    data = client.get('/api/setup/preset/household').get_json()
     assert data['categories'] and data['income_categories']
     assert 'CHECK ME' in data['income_categories']
 
@@ -64,7 +64,7 @@ def test_unknown_preset_is_404(client):
 
 def test_setup_applies_only_what_was_kept(client, db):
     res = client.post('/api/setup', json={
-        'preset': 'household-en',
+        'preset': 'household',
         'categories': [{'name': 'Groceries', 'children': []},
                        {'name': 'Transport', 'children': ['Fuel']}],
         'income_categories': ['Salary', 'CHECK ME'],
@@ -85,7 +85,7 @@ def test_setup_applies_only_what_was_kept(client, db):
 def test_setup_refuses_to_run_twice(client):
     """Applying to a configured install would skip every non-empty table and
     report success while doing nothing."""
-    res = client.post('/api/setup', json={'preset': 'household-en', 'accounts': [['X', 'bank']]})
+    res = client.post('/api/setup', json={'preset': 'household', 'accounts': [['X', 'bank']]})
     assert res.status_code == 409
 
 

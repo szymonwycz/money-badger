@@ -195,6 +195,13 @@ function renderTable(txs) {
       subCell = `<select class="child-sel" style="background:transparent;border:none;color:var(--text2);font-size:inherit;padding:0;max-width:125px">${subOpts}</select>`;
     }
 
+    // BY — who typed this in. Blank for bank imports and for everything entered
+    // before accounts existed, which is most of the history: an empty cell reads
+    // as "nobody in particular", which is exactly what it means.
+    const byCell = SHOW_AUTHOR
+      ? `<td class="tx-by" style="color:var(--text2);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(tx.created_by || '')}</td>`
+      : '';
+
     tr.innerHTML = `
       <td class="tx-date">
         <input type="text" value="${formatDate(tx.date)}" style="width:82px;background:transparent;border:none;color:inherit;font-size:inherit;padding:0" data-field="date">
@@ -211,6 +218,7 @@ function renderTable(txs) {
       <td class="tx-desc" style="word-break:break-word;max-width:200px">${descCell}</td>
       <td style="white-space:nowrap">${catCell}</td>
       <td style="white-space:nowrap;max-width:125px;overflow:hidden;text-overflow:ellipsis">${subCell}</td>
+      ${byCell}
       <td style="text-align:right"><button class="icon-btn tx-del" title="Delete transaction">×</button></td>
     `;
 

@@ -50,4 +50,4 @@ def test_old_dumps_get_pruned():
 if __name__ == "__main__":
     test_dump_writes_readable_json_next_to_state_file()
     test_old_dumps_get_pruned()
-    print("OK — wszystkie testy raw_pull_dump przeszły")
+    print("OK — all raw_pull_dump tests passed")

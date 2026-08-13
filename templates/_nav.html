@@ -9,5 +9,8 @@
   {% if settings['calc.enabled'] == '1' %}
   <a href="/calculator" class="nav-link {{ 'active' if active == '/calculator' }}">{{ settings.get('calc.tab_label', 'CALCULATOR') }}</a>
   {% endif %}
+  {% if auth_enabled %}
+  <a href="/account" class="nav-link {{ 'active' if active == '/account' }}">ACCOUNT</a>
+  {% endif %}
   <a href="/m" class="nav-link nav-mobile-link">MOBILE</a>
 </nav>

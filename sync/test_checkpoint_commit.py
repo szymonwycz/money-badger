@@ -73,4 +73,4 @@ if __name__ == "__main__":
     test_commit_persists_only_that_iban()
     test_commit_with_nothing_pending_is_a_safe_noop()
     test_double_commit_is_a_safe_noop()
-    print("OK — wszystkie testy checkpoint commit przeszły")
+    print("OK — all checkpoint commit tests passed")

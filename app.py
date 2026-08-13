@@ -9,7 +9,7 @@ import os
 import time
 from datetime import datetime
 
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import env_file
 
@@ -30,10 +30,15 @@ migrate(DB_PATH)
 
 # ── authentication ────────────────────────────────────────────────────────────
 #
-# One household, one password — there is no user table and no per-user data.
-# Leaving MB_PASSWORD_HASH empty disables the login entirely, which is a
-# reasonable choice behind a VPN and a terrible one on a public address, so it
-# is logged loudly at startup rather than assumed.
+# One household budget, one login per person. An account says who is typing, not
+# what they may see: everybody works on the same money.
+#
+# MB_PASSWORD_HASH is the switch and the bootstrap. Set, it becomes the first
+# admin account (ensure_admin_account below) and every hash lives in `users`
+# from then on, so changing a password never means editing .env again. Empty, it
+# disables the login entirely, which is a reasonable choice behind a VPN and a
+# terrible one on a public address, so it is logged loudly at startup rather
+# than assumed.
 
 PASSWORD_HASH = os.environ.get('MB_PASSWORD_HASH', '')
 
@@ -65,6 +70,67 @@ elif not os.environ.get('SECRET_KEY'):
 # service worker and manifest, which the browser fetches outside the session.
 PUBLIC_PATHS = {'/login', '/sw.js', '/manifest.webmanifest', '/favicon.ico'}
 
+MIN_PASSWORD_LENGTH = 8
+
+
+def valid_username(raw):
+    """The trimmed username, or None when it isn't one.
+
+    Limited to characters that need no escaping in HTML, in a log line or in a
+    URL, because a username ends up in all three."""
+    name = (raw or '').strip()
+    if not 2 <= len(name) <= 32:
+        return None
+    return name if all(c.isascii() and (c.isalnum() or c in '._-') for c in name) else None
+
+
+def ensure_admin_account():
+    """Promote the instance password to a named admin account, once.
+
+    Runs on every start and does nothing as soon as anybody is registered, so
+    upgrading from the single-password build costs the host nothing: the password
+    they have been typing keeps working, with a username in front of it now.
+    MB_ADMIN_USER names that account and is read only on the run that creates it.
+
+    Returns the admin's id — which is also who a session issued before the
+    upgrade turns out to have belonged to.
+    """
+    if not PASSWORD_HASH:
+        return None
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    try:
+        row = db.execute('SELECT id FROM users ORDER BY is_admin DESC, id LIMIT 1').fetchone()
+        if row:
+            return row['id']
+        username = valid_username(os.environ.get('MB_ADMIN_USER')) or 'admin'
+        cur = db.execute(
+            'INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?, ?, 1, ?)',
+            (username, PASSWORD_HASH, datetime.now().isoformat(timespec='seconds')))
+        db.commit()
+        logging.getLogger(__name__).info(
+            'created the admin account %r from MB_PASSWORD_HASH — sign in with that '
+            'username and the password you already have', username)
+        return cur.lastrowid
+    finally:
+        db.close()
+
+
+LEGACY_ADMIN_ID = ensure_admin_account()
+
+
+def current_user():
+    """The signed-in person, or None — which is what the pipeline's API token and a
+    login-disabled install both look like. Nothing is scoped per user, so None
+    costs nothing but an unattributed row.
+
+    Re-read rather than cached on `g`: it is one indexed row, and a cache here
+    would go on answering for an account that was deleted mid-request-cycle."""
+    uid = session.get('uid')
+    if not uid:
+        return None
+    return get_db().execute('SELECT * FROM users WHERE id=?', (uid,)).fetchone()
+
 
 @app.before_request
 def require_login():
@@ -73,7 +139,14 @@ def require_login():
     if request.path in PUBLIC_PATHS or request.path.startswith('/static/'):
         return None
     if session.get('authed'):
-        return None
+        # A session from the single-password build carries no user id: it predates
+        # the users table, so it belongs to the account that password became.
+        # Adopting it beats logging the whole household out on upgrade.
+        session.setdefault('uid', LEGACY_ADMIN_ID)
+        if current_user() is not None:
+            return None
+        # The account was removed while its session was still open.
+        session.clear()
     if API_TOKEN and secrets.compare_digest(request.headers.get('X-MB-Token', ''), API_TOKEN):
         return None
     if request.path.startswith('/api/'):
@@ -103,6 +176,11 @@ def redirect_to_setup():
 MAX_LOGIN_ATTEMPTS = 5
 LOGIN_LOCKOUT_SECONDS = 15 * 60
 _login_failures = {}  # ip -> [count, locked_until_monotonic]
+
+# A real hash for unknown usernames to be checked against, so a name that exists
+# and one that doesn't cost the same time and the form cannot be used to find out
+# who has an account here.
+NO_SUCH_USER_HASH = generate_password_hash('no such user')
 
 
 def _client_ip():
@@ -154,16 +232,22 @@ def login():
             app.logger.warning('login locked out for %s (%ds left)', ip, locked_for)
             error = f'Too many attempts. Try again in {locked_for // 60 + 1} min.'
             return render_template('login.html', error=error), 429
-        if check_password_hash(PASSWORD_HASH, request.form.get('password', '')):
+        username = (request.form.get('username') or '').strip()
+        user = get_db().execute('SELECT * FROM users WHERE username=?', (username,)).fetchone()
+        ok = check_password_hash(user['password_hash'] if user else NO_SUCH_USER_HASH,
+                                 request.form.get('password', ''))
+        if user and ok:
             _login_failures.pop(ip, None)
+            session.clear()
             session.permanent = True
             session['authed'] = True
+            session['uid'] = user['id']
             nxt = request.args.get('next', '/')
             # Only ever redirect within this app, never to a supplied URL.
             return redirect(nxt if nxt.startswith('/') and not nxt.startswith('//') else '/')
         _note_login_failure(ip)
-        app.logger.warning('failed login from %s', ip)
-        error = 'Wrong password'
+        app.logger.warning('failed login as %r from %s', username, ip)
+        error = 'Wrong username or password'
     return render_template('login.html', error=error), (401 if error else 200)
 
 
@@ -308,7 +392,7 @@ def next_month_year(month, year):
 
 
 def parse_flexible_date(date_str):
-    """Sparsuj datę w DD/MM/YYYY, YYYY-MM-DD lub DD.MM.YYYY → datetime, albo None."""
+    """Parse DD/MM/YYYY, YYYY-MM-DD or DD.MM.YYYY into a datetime, or None."""
     if not date_str:
         return None
     for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d.%m.%Y'):
@@ -371,8 +455,11 @@ def get_settings(db):
 
 @app.context_processor
 def inject_settings():
-    """Currency and locale reach every template, so no page has to hardcode 'zł'."""
-    return {'settings': get_settings(get_db())}
+    """Currency and locale reach every template, so no page has to hardcode 'zł'.
+    The signed-in user rides along for the nav, which drops the ACCOUNT tab on an
+    install with the login switched off."""
+    return {'settings': get_settings(get_db()), 'user': current_user(),
+            'auth_enabled': bool(PASSWORD_HASH)}
 
 
 @app.route('/api/settings')
@@ -389,6 +476,137 @@ def update_settings():
                    (key, str(value)))
     db.commit()
     return jsonify(get_settings(db))
+
+
+# ── routes: people ────────────────────────────────────────────────────────────
+#
+# Several logins over the one budget. An admin adds and removes people and resets
+# a forgotten password; everybody changes their own. Nobody, admin included, can
+# read a password — only hashes are stored, so a reset is the only way back in.
+
+
+def admin_required():
+    """None when the caller may manage people, otherwise the refusal to return.
+    With the login switched off there is no admin and nothing to protect."""
+    user = current_user()
+    if user and user['is_admin']:
+        return None
+    return jsonify({'error': 'admin only'}), 403
+
+
+def new_password_from(data):
+    """A password out of a request body, or None when it is too short to accept."""
+    password = data.get('password') or ''
+    return password if len(password) >= MIN_PASSWORD_LENGTH else None
+
+
+TOO_SHORT = {'error': f'Password must be at least {MIN_PASSWORD_LENGTH} characters.'}
+
+
+@app.route('/account')
+def account_page():
+    # Without a login there are no accounts, so there is nothing on this page.
+    if not PASSWORD_HASH:
+        return redirect('/')
+    return render_template('account.html', active='/account')
+
+
+@app.route('/api/users')
+def api_users():
+    """Who can sign in. Hashes never leave the database."""
+    refusal = admin_required()
+    if refusal:
+        return refusal
+    rows = get_db().execute(
+        'SELECT id, username, is_admin, created_at FROM users ORDER BY id').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/users', methods=['POST'])
+def create_user():
+    refusal = admin_required()
+    if refusal:
+        return refusal
+    data = request.json or {}
+    username = valid_username(data.get('username'))
+    if not username:
+        return jsonify({'error': 'Username must be 2–32 letters, digits, dot, dash '
+                                 'or underscore.'}), 400
+    password = new_password_from(data)
+    if not password:
+        return jsonify(TOO_SHORT), 400
+    db = get_db()
+    try:
+        db.execute('INSERT INTO users (username, password_hash, is_admin, created_at) '
+                   'VALUES (?, ?, ?, ?)',
+                   (username, generate_password_hash(password),
+                    1 if data.get('is_admin') else 0,
+                    datetime.now().isoformat(timespec='seconds')))
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'That username is taken.'}), 409
+    db.commit()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/users/<int:uid>', methods=['DELETE'])
+def delete_user(uid):
+    """Takes away a login and nothing else: their transactions stay, with the
+    author cleared."""
+    refusal = admin_required()
+    if refusal:
+        return refusal
+    if uid == current_user()['id']:
+        # Refusing this is also what guarantees an admin is always left standing.
+        return jsonify({'error': "You can't remove your own account."}), 400
+    db = get_db()
+    if not db.execute('SELECT 1 FROM users WHERE id=?', (uid,)).fetchone():
+        return jsonify({'error': 'not found'}), 404
+    db.execute('DELETE FROM users WHERE id=?', (uid,))
+    db.commit()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/users/<int:uid>/password', methods=['PUT'])
+def reset_user_password(uid):
+    """An admin resetting somebody else's forgotten password. Their own goes
+    through /api/account/password, which asks for the current one first."""
+    refusal = admin_required()
+    if refusal:
+        return refusal
+    if uid == current_user()['id']:
+        return jsonify({'error': 'Change your own password with your current one.'}), 400
+    password = new_password_from(request.json or {})
+    if not password:
+        return jsonify(TOO_SHORT), 400
+    db = get_db()
+    if not db.execute('SELECT 1 FROM users WHERE id=?', (uid,)).fetchone():
+        return jsonify({'error': 'not found'}), 404
+    db.execute('UPDATE users SET password_hash=? WHERE id=?',
+               (generate_password_hash(password), uid))
+    db.commit()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/account/password', methods=['PUT'])
+def change_own_password():
+    """Anyone signed in, on their own account only. The current password is asked
+    for so a borrowed unlocked browser can't lock its owner out."""
+    user = current_user()
+    if not user:
+        return jsonify({'error': 'authentication required'}), 401
+    data = request.json or {}
+    if not check_password_hash(user['password_hash'], data.get('current_password') or ''):
+        app.logger.warning('failed password change for %r from %s',
+                           user['username'], _client_ip())
+        return jsonify({'error': 'Current password is wrong.'}), 403
+    password = new_password_from(data)
+    if not password:
+        return jsonify(TOO_SHORT), 400
+    db = get_db()
+    db.execute('UPDATE users SET password_hash=? WHERE id=?',
+               (generate_password_hash(password), user['id']))
+    db.commit()
+    return jsonify({'ok': True})
 
 
 # ── routes: first-run setup ───────────────────────────────────────────────────
@@ -717,11 +935,13 @@ def get_transactions():
 
     query = '''SELECT t.id, t.date, t.amount, t.account, t.account_to, t.tx_type,
                       t.description, t.category_id, t.income_category_id,
-                      c.name as cat_name, p.name as parent_name, ic.name as income_cat_name
+                      c.name as cat_name, p.name as parent_name, ic.name as income_cat_name,
+                      u.username as created_by
                FROM transactions t
                LEFT JOIN categories c ON t.category_id = c.id
                LEFT JOIN categories p ON c.parent_id = p.id
                LEFT JOIN income_categories ic ON t.income_category_id = ic.id
+               LEFT JOIN users u ON t.created_by = u.id
                WHERE t.month=? AND t.year=?'''
     params = [month, year]
     if category_id is not None:
@@ -749,6 +969,7 @@ def get_transactions():
             'parent_name':        r['parent_name'],
             'income_category_id': r['income_category_id'],
             'income_cat_name':    r['income_cat_name'],
+            'created_by':         r['created_by'],
         })
     return jsonify(result)
 
@@ -846,11 +1067,17 @@ def add_transaction():
     cat_id        = data.get('category_id')
     income_cat_id = data.get('income_category_id') if tx_type == 'Income' else None
     amount        = parse_money(data.get('amount', 0))
+    # Whoever is signed in owns the row. The pipeline holds a token, not a
+    # session, so its imports have no author — and neither has anything entered
+    # before accounts existed.
+    user = current_user()
     db.execute(
         '''INSERT INTO transactions (date, amount, account, account_to, description,
-           category_id, income_category_id, tx_type, month, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+           category_id, income_category_id, tx_type, month, year, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (dt.strftime('%Y-%m-%d'), amount, data.get('account', ''),
-         account_to, data.get('description', ''), cat_id, income_cat_id, tx_type, dt.month, dt.year)
+         account_to, data.get('description', ''), cat_id, income_cat_id, tx_type,
+         dt.month, dt.year, user['id'] if user else None)
     )
     if income_cat_id is not None:
         bump_income_received(db, income_cat_id, dt.month, dt.year, amount)
@@ -1182,7 +1409,7 @@ def get_accounts():
 
 @app.route('/api/accounts/last-dates')
 def accounts_last_dates():
-    """Ostatnia data transakcji per konto — używane przez fetcher EB jako
+    """Latest transaction date per account — the bank fetcher uses it as
     fallback, gdy brakuje lokalnego stanu last_fetch (np. po reset/migracji)."""
     db = get_db()
     rows = db.execute("SELECT account, date FROM transactions WHERE account != ''").fetchall()
@@ -1248,7 +1475,7 @@ def update_account(aid):
            (date, amount, account, tx_type, description, month, year)
            VALUES (?, ?, ?, 'Balance Adjust', ?, ?, ?)''',
         (datetime.now().strftime('%Y-%m-%d'), diff, acct,
-         f"Edit {sign}{abs(diff):.0f} zł",
+         f"Edit {sign}{abs(diff):.0f} {get_settings(db)['currency']}".strip(),
          datetime.now().month, datetime.now().year)
     )
     # checkpoint: only transactions after this one should affect the displayed balance.

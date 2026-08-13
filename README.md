@@ -114,9 +114,20 @@ Bots are free and take a minute to create.
 
 ## A word about access
 
-The app has one password for the whole instance — there are no user accounts,
-because there is no per-user data. Set one unless the only thing that can reach
-the port is the machine you're sitting at.
+Everyone in the household signs in under their own name and they all see the
+same budget — an account records who added a transaction, it does not split the
+money up. Set a password at install unless the only thing that can reach the
+port is the machine you're sitting at.
+
+That password becomes the first account, called `admin` unless `MB_ADMIN_USER`
+says otherwise. From the ACCOUNT tab it adds everyone else, resets a forgotten
+password and removes a login when someone leaves; everybody changes their own
+password there too. Nobody, that first account included, can read anyone else's
+password — only hashes are stored, so a forgotten one is reset, never looked up.
+
+Upgrading an older install needs no work: the hash already in `MB_PASSWORD_HASH`
+becomes the admin account on the next start, and the sessions that were open at
+the time stay open.
 
 With `MB_PASSWORD_HASH` empty the login is disabled and **every endpoint is open
 to anyone who can connect**, including the full transaction export and delete.

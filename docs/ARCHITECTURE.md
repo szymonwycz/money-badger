@@ -79,6 +79,7 @@ live).
 | `big_expenses` | Yearly one-off projects (LARGE EXPENSES tab) |
 | `calc_items` / `calc_entries` / `calc_adjustments` | Calculator: item definitions, monthly quantities, adjustments |
 | `settings` | Currency, locale, calculator wiring |
+| `users` | Who can sign in: username, password hash, admin flag |
 | `schema_migrations` | Applied migration log |
 
 ### Transaction semantics (important)
@@ -91,6 +92,9 @@ live).
   have no hash.
 - `Balance Adjust` rows are **audit entries** for manual balance edits — they
   are excluded from balance computation and budget math.
+- `created_by` is the account that entered the row by hand. Pipeline imports and
+  everything from before accounts existed have none, and removing a user clears it
+  rather than deleting their money.
 
 ### Computed balances
 
@@ -117,7 +121,7 @@ by the delta, so the INCOME tab stays consistent with the transaction list.
 ## Integration: bank import pipeline
 
 Money Badger does not talk to banks itself. A separate pipeline (same repo,
-`sync/`, orchestrated by `master_pi.py` under `home-badger-sync.timer`):
+`sync/`, orchestrated by `master_pi.py` under `money-badger-sync.timer`):
 
 1. fetches transactions via Enable Banking (PSD2 API),
 2. categorizes them (rules first, LLM for the rest),
@@ -141,8 +145,13 @@ Anything unmatched lands in **CHECK ME** for manual review.
 - **One currency per install.** Symbol and number format are settings, injected
   into every page. Multi-currency — holding balances in two at once, with rates —
   is a different feature and is out of scope.
-- **One password, no user accounts.** No table has a `user_id`; one database is one
-  household. Per-user logins would be a fiction over shared data. The password
-  protects the instance, and can be turned off for a VPN-only install.
+- **Separate logins, one shared budget.** Everybody signs in as themselves and
+  sees the same money: no table is scoped to a user, and `transactions.created_by`
+  only records who typed a row in. Keeping households apart in one database is a
+  different product; the schema leaves the door open — people carry a surrogate id,
+  so a `household_id` column later lands on `users` and on the data tables without
+  rewriting what points at them — but nothing implements it. `MB_PASSWORD_HASH`
+  bootstraps the first admin account and can still be left empty to switch the
+  login off entirely for a VPN-only install.
 - **Nothing seeded.** Migrations build the schema and stop. Starter data comes from
   a preset chosen at `/setup`, so no install inherits anyone else's categories.

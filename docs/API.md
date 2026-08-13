@@ -13,10 +13,17 @@ fetch() gets a real error instead of an HTML login page it can't parse.
 
 With `MB_PASSWORD_HASH` empty there is no authentication at all.
 
+Logins are per person and the budget is shared: an account decides who a
+transaction is attributed to, never what is visible. `MB_PASSWORD_HASH` becomes
+the first admin account on startup — named by `MB_ADMIN_USER`, default `admin` —
+after which the hashes live in the `users` table and the variable is only the
+on/off switch. `X-MB-Token` is the pipeline, not a person: rows it creates have
+no author.
+
 | Endpoint | Description |
 |---|---|
 | `GET /login` | Login form |
-| `POST /login` | `password=` form field. `?next=` is honoured only for in-app paths |
+| `POST /login` | `username=` + `password=` form fields. `?next=` is honoured only for in-app paths |
 | `GET /logout` | Clears the session |
 
 ## Pages
@@ -30,6 +37,7 @@ With `MB_PASSWORD_HASH` empty there is no authentication at all.
 | `GET /large-expenses` | LARGE EXPENSES |
 | `GET /overview` | OVERVIEW (yearly) |
 | `GET /calculator` | CALCULATOR (only when `calc.enabled`) |
+| `GET /account` | ACCOUNT — your own password, plus the people list for an admin |
 | `GET /m` | Mobile PWA |
 | `GET /sw.js` | Service worker (root scope) |
 | `GET /setup` | First-run setup; every other page redirects here until it's done |
@@ -56,8 +64,8 @@ With `MB_PASSWORD_HASH` empty there is no authentication at all.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/transactions?month=&year=` | Month's transactions with resolved category names; transfer descriptions rendered as `→ TargetAccount` |
-| `POST /api/transactions` | Manual add: `{date, amount, account?, description?, category_id?, tx_type?}`. Date accepts `DD/MM/YYYY`, `YYYY-MM-DD`, `DD.MM.YYYY`; stored as ISO |
+| `GET /api/transactions?month=&year=` | Month's transactions with resolved category names; transfer descriptions rendered as `→ TargetAccount`. `created_by` is the username that entered it, `null` for imports and for anything older than accounts |
+| `POST /api/transactions` | Manual add: `{date, amount, account?, description?, category_id?, tx_type?}`. Date accepts `DD/MM/YYYY`, `YYYY-MM-DD`, `DD.MM.YYYY`; stored as ISO. Attributed to the signed-in account |
 | `POST /api/transactions/bulk` | Pipeline import. Array of `{date, amount, account, account_to?, tx_type?, description?, category, hash}`. Hash-deduplicated (`INSERT OR IGNORE`). Resolves `category` against expense tree first, then income categories; the literal `CHECK ME` is never resolved. Income inserts credit `income_entries.received` |
 | `PUT /api/transactions/<id>` | Partial update of `date/amount/account/description/category_id`. Category changes are logged to `corrections`; amount/month changes on income transactions adjust `received`. Invalid date → 400 |
 | `DELETE /api/transactions/<id>` | Deletes (rolls back `received` for income, removes its correction rows) |
@@ -110,6 +118,19 @@ With `MB_PASSWORD_HASH` empty there is no authentication at all.
 | `PUT /api/settings` | Upsert the given keys; returns the full map |
 
 See [CONFIGURATION.md](CONFIGURATION.md#the-settings-table) for the keys.
+
+## People
+
+Admin only, and there is no admin on an install with the login switched off — so
+every one of these answers **403** there.
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/users` | `[{id, username, is_admin, created_at}]` — never a hash |
+| `POST /api/users` | `{username, password, is_admin?}`. Username is 2–32 of `A-Za-z0-9._-` and case-insensitively unique; password at least 8 characters. **409** if the name is taken |
+| `DELETE /api/users/<id>` | Removes the login; their transactions stay and lose their author. **400** on your own account, which is what keeps one admin standing |
+| `PUT /api/users/<id>/password` | `{password}` — reset a forgotten one. **400** on your own account |
+| `PUT /api/account/password` | `{current_password, password}` — your own, for any signed-in user (not admin-only). **403** if the current one is wrong |
 
 ## Setup
 

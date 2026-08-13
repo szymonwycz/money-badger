@@ -73,7 +73,7 @@ function renderItem(e) {
     });
   });
 
-  // Miesiąc change — zapisz
+  // month changed — save
   row.querySelector('.le-month-sel').addEventListener('change', async ev => {
     await api(`/api/big-expenses/${e.id}`, {
       method: 'PUT',
@@ -94,7 +94,7 @@ function renderItem(e) {
     load();
   });
 
-  // Hover: pokaż border na inputs przy hover na row
+  // show the input borders while the row is hovered
   row.addEventListener('mouseenter', () => {
     row.querySelectorAll('.le-item-desc-input, .le-item-amount-input').forEach(i => {
       i.style.borderBottomColor = 'var(--border)';

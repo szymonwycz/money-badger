@@ -90,8 +90,8 @@ RAW_PULL_RETENTION_DAYS = 90
 
 
 def _dump_raw_pull(state_file: str, bare_iban: str, date_from: str, date_to: str, body: dict) -> None:
-    """Zapisuje surową odpowiedź EB (przed konwersją/kategoryzacją) do raw_pulls/ —
-    żeby przy debugowaniu/reprocessingu nie trzeba było znowu odpytywać EB
+    """Write the bank's raw response to raw_pulls/, before any conversion or
+    categorization, so debugging or reprocessing never costs another API call
     (dzienny limit ASPSP na fetch w tle, patrz komentarz przy 429 w fetch())."""
     raw_dir = Path(state_file).parent.parent / "raw_pulls"
     raw_dir.mkdir(exist_ok=True)
@@ -123,9 +123,9 @@ class EnableBankingFetcher:
         # caller uses this to avoid reporting a run as successful when some
         # accounts got no fetch attempt at all (see cmd_fetch in main.py).
         self.last_skipped: list[str] = []
-        # Powód pominięcia per IBAN (bare) — do czytelnych powiadomień Telegram
-        # (master_pi.py), obok last_skipped które zostaje niezmienione (testy
-        # w test_skipped_accounts.py sprawdzają je jako plain list[str]).
+        # Skip reason per bare IBAN, so the Telegram notification in master_pi.py
+        # can say why. Kept alongside last_skipped, which stays a plain list[str] —
+        # test_skipped_accounts.py asserts on that shape.
         self.skip_reasons: dict[str, str] = {}
 
     def _headers(self) -> dict:
@@ -157,7 +157,7 @@ class EnableBankingFetcher:
         for iban in ibans:
             full_iban = _iban.full_iban(iban, self.iban_country)
             if full_iban in sessions:
-                print(f"  [{full_iban[-10:]}...] już autoryzowane, pomijam.")
+                print(f"  [{full_iban[-10:]}...] already authorized, skipping.")
                 continue
 
             aspsp = aspsp_by_iban.get(full_iban) or default_aspsp
@@ -179,9 +179,9 @@ class EnableBankingFetcher:
             r.raise_for_status()
             auth_url = r.json().get("url")
 
-            print(f"\nOtwórz link i zaloguj się do {aspsp['name']}:\n\n  {auth_url}\n")
-            print("Po autoryzacji przeglądarka przekieruje na https://localhost/ (błąd jest OK).")
-            print("Skopiuj PEŁNY URL z paska przeglądarki i wklej poniżej:")
+            print(f"\nOpen this link and sign in to {aspsp['name']}:\n\n  {auth_url}\n")
+            print("Afterwards the browser lands on https://localhost/ and shows an error — that is fine.")
+            print("Copy the FULL url out of the address bar and paste it here:")
             redirect_url = input("URL: ").strip()
 
             parsed = urlparse(redirect_url)
@@ -245,11 +245,11 @@ class EnableBankingFetcher:
 
             dead_reason = _dead_today(state, full_iban)
             if dead_reason == "quota":
-                print(f"  [{bare_iban[-10:]}...] limit ASPSP już dziś wyczerpany — pomijam bez zapytania")
+                print(f"  [{bare_iban[-10:]}...] ASPSP limit already spent today — skipping without a call")
                 results[bare_iban] = None
                 continue
             if dead_reason == "session":
-                print(f"  [{bare_iban[-10:]}...] sesja już dziś martwa — pomijam bez zapytania (fetch-setup)")
+                print(f"  [{bare_iban[-10:]}...] session already known dead today — skipping without a call (fetch-setup)")
                 results[bare_iban] = None
                 continue
 
@@ -259,20 +259,21 @@ class EnableBankingFetcher:
                 timeout=30,
             )
             if r.status_code == 429:
-                # ASPSP-side daily quota for background fetches (zwykle ~4x/dzień,
-                # bez obecności PSU) — nie throttling per-sekundę. Krótki retry nic
-                # nie da, EB każe czekać ~6h / do jutra. https://enablebanking.com/docs/faq/
-                print(f"  [{bare_iban[-10:]}...] limit ASPSP wyczerpany na dziś — spróbuj za kilka godzin/jutro")
+                # ASPSP-side daily quota for background fetches — typically about
+                # four a day without the account holder present, not a per-second
+                # throttle. A short retry buys nothing; the wait is hours or until
+                # tomorrow. https://enablebanking.com/docs/faq/
+                print(f"  [{bare_iban[-10:]}...] ASPSP limit spent for today — try in a few hours or tomorrow")
                 _mark_dead_today(self.state_file, state, full_iban, 429)
                 results[bare_iban] = None
                 continue
             if r.status_code == 401:
-                print(f"  [{bare_iban[-10:]}...] sesja wygasła — uruchom: python main.py fetch-setup")
+                print(f"  [{bare_iban[-10:]}...] session expired — run: python main.py fetch-setup")
                 _mark_dead_today(self.state_file, state, full_iban, 401)
                 results[bare_iban] = None
                 continue
             if r.status_code != 200:
-                print(f"  [{bare_iban[-10:]}...] błąd pobierania salda ({r.status_code})")
+                print(f"  [{bare_iban[-10:]}...] could not read the balance ({r.status_code})")
                 results[bare_iban] = None
                 continue
 
@@ -351,12 +352,12 @@ class EnableBankingFetcher:
 
             dead_reason = _dead_today(state, full_iban)
             if dead_reason == "quota":
-                print(f"  [{bare_iban[-10:]}...] limit ASPSP już dziś wyczerpany — pomijam bez zapytania")
+                print(f"  [{bare_iban[-10:]}...] ASPSP limit already spent today — skipping without a call")
                 self.last_skipped.append(bare_iban)
                 self.skip_reasons[bare_iban] = "ASPSP daily limit reached"
                 continue
             if dead_reason == "session":
-                print(f"  [{bare_iban[-10:]}...] sesja już dziś martwa — pomijam bez zapytania (fetch-setup)")
+                print(f"  [{bare_iban[-10:]}...] session already known dead today — skipping without a call (fetch-setup)")
                 self.last_skipped.append(bare_iban)
                 self.skip_reasons[bare_iban] = "session expired (401)"
                 continue
@@ -373,7 +374,7 @@ class EnableBankingFetcher:
                 date_from = cap_date
 
             if date_from > yesterday:
-                print(f"  [{bare_iban[-10:]}...] już aktualne (last_fetch={last_fetches.get(full_iban, '—')}), pomijam")
+                print(f"  [{bare_iban[-10:]}...] already up to date (last_fetch={last_fetches.get(full_iban, '—')}), skipping")
                 continue
 
             print(f"  Pobieranie {bare_iban[-10:]}... (od {date_from} do {yesterday})")
@@ -387,16 +388,16 @@ class EnableBankingFetcher:
 
             if r.status_code == 429:
                 # Patrz komentarz w get_balances() — dzienny limit ASPSP, nie
-                # throttling. Retry po 60s tylko marnuje kolejne wywołanie z tej
-                # samej puli; pomijamy to konto i próbujemy resztę.
-                print(f"  [{bare_iban[-10:]}...] limit ASPSP wyczerpany na dziś — spróbuj za kilka godzin/jutro")
+                # throttling. Retrying in 60s only spends another call from the
+                # same quota, so skip this account and try the rest.
+                print(f"  [{bare_iban[-10:]}...] ASPSP limit spent for today — try in a few hours or tomorrow")
                 _mark_dead_today(self.state_file, state, full_iban, 429)
                 self.last_skipped.append(bare_iban)
                 self.skip_reasons[bare_iban] = "ASPSP daily limit reached"
                 continue
 
             if r.status_code == 401:
-                print(f"  Sesja wygasła — uruchom: python main.py fetch-setup (konto {bare_iban[-10:]}...)")
+                print(f"  Session expired — run: python main.py fetch-setup (account {bare_iban[-10:]}...)")
                 _mark_dead_today(self.state_file, state, full_iban, 401)
                 self.last_skipped.append(bare_iban)
                 self.skip_reasons[bare_iban] = "session expired (401)"
@@ -419,7 +420,7 @@ class EnableBankingFetcher:
             before = len(converted)
             converted = [tx for tx in converted if tx["_eb_id"] not in all_seen]
             if len(converted) < before:
-                print(f"  ⚠ pominięto {before - len(converted)} duplikat(ów)")
+                print(f"  ⚠ dropped {before - len(converted)} duplicate(s)")
 
             # Record new IDs grouped by booking_date; prune entries older than days_back
             for tx in converted:

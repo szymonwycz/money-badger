@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Money Badger – Account</title>
+<meta name="theme-color" content="#1a2535">
+<link rel="manifest" href="/static/manifest.webmanifest?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/icon-192.png?v={{ v }}">
+<link rel="stylesheet" href="/static/style.css?v={{ v }}">
+<style>
+  .acct-section { background: var(--panel); border: 1px solid var(--border);
+                  border-radius: var(--radius-lg); padding: var(--space-lg);
+                  margin-bottom: var(--space-lg); max-width: 620px; }
+  .acct-section h2 { font-size: var(--fs-md); color: var(--text2);
+                     letter-spacing: 1px; margin: 0 0 var(--space-md); }
+  .acct-section input[type="password"], .acct-section input[type="text"] {
+      width: 100%; margin-bottom: var(--space-sm); }
+  .acct-row { display: flex; align-items: center; gap: var(--space-sm);
+              padding: var(--space-sm) 0; border-top: 1px solid var(--border); }
+  .acct-name { flex: 1; font-size: var(--fs-md); }
+  .acct-tag  { color: var(--text2); font-size: var(--fs-sm); }
+  .acct-hint { color: var(--text2); font-size: var(--fs-sm); margin: var(--space-sm) 0 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <img src="/static/badger.png?v={{ v }}" class="app-logo" alt="Money Badger">
+
+  {% include "_nav.html" %}
+
+  <div class="le-header">
+    <h1 class="le-title">ACCOUNT</h1>
+    <a class="btn btn-blue" href="/logout">Sign out</a>
+  </div>
+
+  <div class="acct-section">
+    <h2>SIGNED IN AS {{ (user['username'] if user else '—')|upper }}</h2>
+    <input type="password" id="pw-current" placeholder="Current password"
+           autocomplete="current-password">
+    <input type="password" id="pw-new" placeholder="New password (at least 8 characters)"
+           autocomplete="new-password">
+    <button class="btn btn-yellow" id="btn-change-pw">Change my password</button>
+  </div>
+
+  {% if user and user['is_admin'] %}
+  <div class="acct-section">
+    <h2>PEOPLE</h2>
+    <div id="user-list"></div>
+    <p class="acct-hint">Everyone here sees the same budget. Removing someone takes
+       away their login; the transactions they entered stay.</p>
+    <div style="margin-top:var(--space-lg)">
+      <input type="text" id="new-username" placeholder="Username"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <input type="password" id="new-password" placeholder="Password (at least 8 characters)"
+             autocomplete="new-password">
+      <label class="acct-tag">
+        <input type="checkbox" id="new-is-admin" style="width:auto;margin-right:6px">
+        can manage people
+      </label>
+      <button class="btn btn-yellow btn-full" id="btn-add-user">Add person</button>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<script>window.MB = {{ settings|tojson }};</script>
+<script src="/static/common.js?v={{ v }}"></script>
+<script src="/static/account.js?v={{ v }}"></script>
+<script src="/static/nav-badge.js?v={{ v }}"></script>
+</body>
+</html>

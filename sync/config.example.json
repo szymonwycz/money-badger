@@ -42,6 +42,20 @@
 
   "batch_size": 30,
 
+  "_comment_order_matching": "Order confirmation emails matched to the card payments they explain, so a row reading only AMAZON gets the product names and a category. Each shop is read from its own mail folder — on Gmail, a label. Mailbox credentials live in .env (MAIL_ADDRESS / MAIL_PASSWORD). Delete this block to read Allegro and nothing else.",
+  "order_matching": {
+    "_comment_shops": "Allegro is parsed from its own template. Every other shop is read by the LLM, which costs a fraction of a cent per email and needs no knowledge of the template. The key is the name written into the transaction description.",
+    "shops": {
+      "Allegro": {"folder": "Allegro"},
+      "Amazon": {"folder": "Amazon"}
+    },
+
+    "_comment_fx": "A foreign order reaches the statement converted at the bank's own rate, so it is matched within fx_tolerance_pct of the rate you give here. A currency with no rate is never matched, only reported for manual review. local_currency is what your accounts are denominated in.",
+    "local_currency": "PLN",
+    "fx_rates": {"EUR": 4.30, "USD": 4.00},
+    "fx_tolerance_pct": 5
+  },
+
   "_comment_eb": "Enable Banking credentials. Register your own application at enablebanking.com, download the private key, and put the app id here. See docs/ENABLE_BANKING.md.",
   "enable_banking": {
     "app_id": "",

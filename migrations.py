@@ -313,6 +313,31 @@ def _0008_drop_lot_tables(db):
     db.execute('DROP TABLE IF EXISTS lot_plans')
 
 
+def _0009_users(db):
+    """Named logins over the one shared budget.
+
+    Everyone signs in as themselves and sees the same money: no table is scoped
+    to a user, and `created_by` only records who typed a transaction in. The
+    instance password becomes the first admin account on startup — see
+    ensure_admin_account() in app.py — and the rest are added from ACCOUNT.
+
+    People are keyed on a surrogate id rather than on the username, so the day
+    households have to be kept apart, `household_id` lands on this table (and on
+    the data tables) without rewriting the rows that already point here.
+
+    Deleting a user clears the author instead of taking the money with it, which
+    is also the state every row imported before this migration is in.
+    """
+    db.execute('''CREATE TABLE IF NOT EXISTS users (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                      password_hash TEXT NOT NULL,
+                      is_admin INTEGER NOT NULL DEFAULT 0,
+                      created_at TEXT NOT NULL)''')
+    db.execute('ALTER TABLE transactions ADD COLUMN created_by INTEGER '
+               'REFERENCES users(id) ON DELETE SET NULL')
+
+
 MIGRATIONS = [
     ('0001_baseline', _0001_baseline),
     ('0002_indexes', _0002_indexes),
@@ -322,6 +347,7 @@ MIGRATIONS = [
     ('0006_settings', _0006_settings),
     ('0007_calculator', _0007_calculator),
     ('0008_drop_lot_tables', _0008_drop_lot_tables),
+    ('0009_users', _0009_users),
 ]
 
 

@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
-master_pi.py – codzienny orchestrator fetch/push dla Money Badger.
+master_pi.py – the daily fetch/push orchestrator.
 
-Kroki: 0 fetch z banku → 0b nauka reguł z korekt → 3 push do appki → 4 Allegro.
+Steps: 0 fetch from the bank -> 0b learn rules from corrections -> 3 push to the
+app -> 4 match orders from email.
 
-Salda kont (dawny Krok 0c) NIE są już częścią tego pipeline'u — to tylko
-kontrola rozbieżności (aplikacja liczy saldo z transakcji, nie z EB), więc
-przeniesione na osobny, cotygodniowy timer (home-badger-balance-check.timer,
-sobota 02:30) zamiast bić w limit ASPSP przy każdym sync/watchdog hopie.
+Account balances are deliberately not part of this pipeline. The app derives a
+balance from its transactions rather than from the bank, so comparing the two is
+only a drift check — it runs on its own weekly timer
+(money-badger-balance-check.timer) instead of spending an ASPSP call on every
+sync and watchdog hop, since most banks allow only a few per day.
 
-Tryb: python3 master_pi.py [--dry-run]
-Uruchamiany codziennie o 10:30 przez systemd timer (home-badger-sync.timer).
+    python3 master_pi.py [--dry-run]
+
+Run daily by money-badger-sync.timer.
 """
 
 import argparse
@@ -24,7 +27,7 @@ BASE_DIR      = Path(__file__).parent
 SYNC_SCRIPT   = BASE_DIR / "sync" / "main.py"
 SYNC_CFG      = BASE_DIR / "sync" / "config.json"
 PUSH_SCRIPT   = BASE_DIR / "push_actuals.py"
-ALLEGRO_SCRIPT = BASE_DIR / "sync" / "allegro_match.py"
+ALLEGRO_SCRIPT = BASE_DIR / "sync" / "order_match.py"
 
 import budget_client
 import env_file
@@ -44,13 +47,13 @@ def _get_checkme_count() -> str:
         return "?"
 
 
-# Powody skipów, które fetch()/get_balances() zwracają same z siebie (patrz
-# sync/banks/enable_banking.py) — żaden z nich nie naprawi się przez odczekanie
-# 60s i ponowienie: limit ASPSP wraca dopiero jutro, a wygasła/brakująca sesja
-# wymaga ręcznego `fetch-setup`. Retry ma sens tylko dla realnie przejściowych
-# błędów (Anthropic API, aplikacja chwilowo nie odpowiada podczas kategoryzacji
-# w cmd_fetch) — te trafiają do failed_reasons z INNYM tekstem (treść wyjątku),
-# więc rozróżnienie po treści stringa wystarcza.
+# Skip reasons that fetch()/get_balances() report themselves (see
+# sync/banks/enable_banking.py). None of them heal by waiting 60 seconds: the
+# ASPSP limit resets tomorrow, and an expired or missing session needs a manual
+# `fetch-setup`. Retrying is only worth it for genuinely transient failures —
+# the LLM API, or the app not answering during categorization — and those reach
+# failed_reasons as exception text, which never matches these, so comparing the
+# string is enough to tell them apart.
 NON_RETRYABLE_REASONS = {
     "ASPSP daily limit reached",
     "session expired (401)",
@@ -69,12 +72,14 @@ def _only_non_retryable_failures() -> bool:
 
 
 def run_fetch(dry_run: bool = False) -> bool:
-    """Krok 0: pobierz transakcje przez Enable Banking. Pomija cicho (zwraca True)
-    jeśli EB nie jest skonfigurowany — to nie jest błąd, tylko "nic do zrobienia".
-    Zwraca False jeśli fetch/kategoryzacja faktycznie się nie powiodły (nawet dla
-    części kont) — main() używa tego, żeby NIE oznaczać runu jako udany, więc
-    watchdog (home-badger-sync-watchdog.timer) faktycznie ponowi próbę o 14:30
-    zamiast cicho uznać dzień za załatwiony."""
+    """Step 0: pull transactions through Enable Banking.
+
+    Returns True and does nothing when Enable Banking is not configured — that is
+    a valid setup, not a failure. Returns False when the fetch or categorization
+    actually failed, even for a single account, so main() withholds the success
+    marker and the watchdog retries later the same day instead of quietly writing
+    the day off.
+    """
     try:
         cfg = json.loads(SYNC_CFG.read_text(encoding="utf-8"))
     except Exception:
@@ -89,16 +94,17 @@ def run_fetch(dry_run: bool = False) -> bool:
     result = subprocess.run(cmd, cwd=str(SYNC_SCRIPT.parent))
     if result.returncode != 0:
         if _only_non_retryable_failures():
-            print("\nEnable Banking fetch nieudany — wyłącznie limit ASPSP/sesja (nie coś"
-                  " przejściowego), retry nic by nie dał. Pomijam, spróbuje kolejny watchdog hop.")
+            print("\nEnable Banking fetch failed — ASPSP limit or session only, nothing"
+                  " transient, so a retry would spend another call for nothing."
+                  " Leaving it to the next watchdog hop.")
             return False
-        print("\nOSTRZEŻENIE: Enable Banking fetch nieudany — retry za 60s...")
+        print("\nWARNING: Enable Banking fetch failed — retrying in 60s...")
         time.sleep(60)
         result = subprocess.run(cmd, cwd=str(SYNC_SCRIPT.parent))
         if result.returncode != 0:
-            print("\n❌ Enable Banking fetch nieudany (2/2) — część lub wszystkie konta"
-                  " NIE zostały przetworzone. Checkpoint dla nich jest bezpieczny"
-                  " (nic nie zgubione) — spróbuje ponownie watchdog o 14:30 lub jutrzejszy sync.")
+            print("\n❌ Enable Banking fetch failed (2/2) — some or all accounts were"
+                  " not processed. Their checkpoints were not advanced, so nothing is"
+                  " lost; the watchdog or tomorrow's sync will fetch them again.")
             return False
     return True
 
@@ -119,14 +125,14 @@ def run_learn_from_budget(dry_run: bool = False):
             cwd=str(BASE_DIR),
         )
         if result.returncode != 0:
-            print("  Ostrzeżenie: push_actuals (pull korekt) zakończył się błędem.")
+            print("  Warning: push_actuals (pulling corrections) failed.")
             return
 
         new_csvs = [f for f in corrections_dir.glob("budget_corrections_*.csv")]
         if not new_csvs:
             return
 
-        print("  Uczę się z korekt (main.py learn)...")
+        print("  Learning from corrections (main.py learn)...")
         cmd = [sys.executable, str(SYNC_SCRIPT), "learn"]
         if dry_run:
             cmd.append("--dry-run")
@@ -135,8 +141,8 @@ def run_learn_from_budget(dry_run: bool = False):
             # Return code used to be ignored: learn could crash and the corrections
             # were flagged synced anyway, so the rules never learned them and nothing
             # ever retried — the flag is one-way.
-            print("  Ostrzeżenie: main.py learn zakończył się błędem — "
-                  "korekty NIE zostaną oznaczone, ponowię przy następnym runie.")
+            print("  Warning: main.py learn failed — the corrections stay unmarked "
+                  "and will be picked up again on the next run.")
             return
 
         if not dry_run:
@@ -147,16 +153,16 @@ def run_learn_from_budget(dry_run: bool = False):
                 if ids_file.exists():
                     ids += [int(i) for i in ids_file.read_text().split(",") if i.strip()]
             if not ids:
-                print("  Brak listy id korekt — pomijam oznaczanie (zostaną ponowione).")
+                print("  No correction ids returned — not marking them, so they will be retried.")
                 return
 
             try:
                 budget_client.post("/api/corrections/mark-synced", {"ids": ids}, timeout=5)
             except Exception:
-                pass  # aplikacja chwilowo niedostępna — korekty zostaną ponowione przy następnym runie
+                pass  # app briefly unreachable; the corrections come round again next run
 
     except Exception as e:
-        print(f"  Ostrzeżenie: błąd integracji z aplikacją: {e}")
+        print(f"  Warning: could not talk to the app: {e}")
 
 
 def run_push_actuals():
@@ -167,9 +173,11 @@ def run_push_actuals():
 
 
 def run_allegro_match():
-    """Krok 4: dopasuj maile z zakupami Allegro do transakcji CHECK ME.
-    Pomija cicho jeśli GMAIL_ADDRESS/GMAIL_APP_PASSWORD nie są skonfigurowane
-    (patrz sync/allegro_match.py) — nieblokujące, tak jak inne opcjonalne kroki."""
+    """Step 4: match order confirmation emails against CHECK ME transactions.
+
+    Does nothing when no mailbox is configured (see sync/order_match.py), like
+    every other optional step — it never blocks the rest of the pipeline.
+    """
     if not ALLEGRO_SCRIPT.exists():
         return
     subprocess.run([sys.executable, str(ALLEGRO_SCRIPT)], cwd=str(SYNC_SCRIPT.parent))
@@ -195,14 +203,14 @@ def main():
     print()
 
     if args.dry_run:
-        print("[dry-run] Push pominięty.")
+        print("[dry-run] Push skipped.")
         return
 
-    print("=== Krok 3: Push transakcji do aplikacji ===\n")
+    print("=== Step 3: Push transactions to the app ===\n")
     run_push_actuals()
     print()
 
-    print("=== Krok 4: Dopasowanie zakupów Allegro (Gmail) ===\n")
+    print("=== Step 4: Match orders from email ===\n")
     run_allegro_match()
 
     try:
@@ -251,9 +259,9 @@ def main():
                    f"CHECK ME: {_n(int(checkme_count), 'transaction') if checkme_count.isdigit() else checkme_count}")
         send_telegram(msg)
     else:
-        print(f"\n❌❌❌ SYNC NIEPEŁNY — fetch/kategoryzacja nie powiodła się dla części lub"
-              f" wszystkich kont. Brak markera sukcesu → watchdog ponowi próbę o 14:30."
-              f" Sprawdź logs/sync_{today_str}.log.")
+        print(f"\n❌❌❌ SYNC INCOMPLETE — the fetch or categorization failed for some or"
+              f" all accounts. No success marker was written, so the watchdog will try"
+              f" again. See logs/sync_{today_str}.log.")
         if summary_failed:
             failed_lines = "\n".join(
                 f"{name} - {summary_reasons.get(name, 'unknown reason')}" for name in summary_failed
