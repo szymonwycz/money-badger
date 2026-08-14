@@ -13,7 +13,7 @@ Character: personal and domestic, but precise like a financial instrument. Not c
 |---|---|---|
 | `style.css` lines 741–746 | `@media (max-width:760px)` closed at line 740; 5 rules sat outside it globally — `.panel-box { position: static }` killed sticky sidebars, `.col-note { display: none }` always hid the NOTE column, stray `}` at EOF | Moved all rules inside a single `@media` block |
 | `tx-table th` | `letter-spacing: 0.6px` — inconsistent with all other uppercase labels | Fixed to `0.8px` |
-| `.calc-row` | `flex-wrap: wrap` caused SILNIK/STBY result values to drop to a new line | Changed to `flex-wrap: nowrap`; tightened `calc-input-rate` from 120px → 100px |
+| `.calc-row` | `flex-wrap: wrap` caused long-label result values (engine runs, standby) to drop to a new line | Changed to `flex-wrap: nowrap`; tightened `calc-input-rate` from 120px → 100px |
 | `.le-item-desc` | `font-size: 14px`, no explicit weight or color set | Set to `13px / 400 / var(--text)` matching leaf-row |
 | `.le-item.done .le-item-amount` | Color was `var(--text2)` (muted) | Fixed to `var(--green)` — completed expense shown as committed spend |
 | `.sum-val` | `font-weight: 700` — same as labels | Changed to `600` — labels own 700, values own 600 |
@@ -220,7 +220,7 @@ Button:
 
 | Class | Width | Align | Notes |
 |---|---|---|---|
-| `.col-cat` | auto, min 160px | left | KATEGORIA |
+| `.col-cat` | auto, min 160px | left | CATEGORY |
 | `.col-basic` | 90px | right | BASIC |
 | `.col-add` | 100px | right | ADDITIONAL |
 | `.col-note` | 160px | left | NOTE |
@@ -335,11 +335,11 @@ Inline edit:
 
 ---
 
-### KALKULATOR
+### CALCULATOR
 
 ```
 .calc-row:
-  flex-wrap: NOWRAP (was wrap — caused SILNIK/STBY to overflow)
+  flex-wrap: NOWRAP (was wrap — long labels overflowed)
   align-items: center
   gap: --space-sm
 

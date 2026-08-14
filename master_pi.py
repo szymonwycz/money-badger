@@ -110,7 +110,7 @@ def run_fetch(dry_run: bool = False) -> bool:
 
 
 def run_learn_from_budget(dry_run: bool = False):
-    """Krok 0b: pobierz korekty z aplikacji → Corrections/ → main.py learn."""
+    """Step 0b: pull corrections from the app → Corrections/ → main.py learn."""
     if not PUSH_SCRIPT.exists():
         return
     try:
@@ -166,7 +166,7 @@ def run_learn_from_budget(dry_run: bool = False):
 
 
 def run_push_actuals():
-    """Krok 3: pushuj transakcje do aplikacji (zwykle ten sam host)."""
+    """Step 3: push transactions to the app (usually the same host)."""
     if not PUSH_SCRIPT.exists():
         return
     subprocess.run([sys.executable, str(PUSH_SCRIPT)], cwd=str(BASE_DIR))
@@ -187,18 +187,18 @@ def main():
     log_path = start_logging("master_pi", BASE_DIR)
     print(f"(log: {log_path})")
 
-    parser = argparse.ArgumentParser(description="Home Badger — codzienny fetch/push (Pi)")
-    parser.add_argument("--dry-run", action="store_true", help="fetch bez zapisu CSV, bez pushu")
+    parser = argparse.ArgumentParser(description="Money Badger — daily fetch/push (Pi)")
+    parser.add_argument("--dry-run", action="store_true", help="fetch without writing CSVs and without pushing")
     args = parser.parse_args()
 
     import datetime
-    print(f"=== Home Badger sync (Pi) — {datetime.date.today().isoformat()} ===\n")
+    print(f"=== Money Badger sync (Pi) — {datetime.date.today().isoformat()} ===\n")
 
-    print("=== Krok 0: Enable Banking fetch ===\n")
+    print("=== Step 0: Enable Banking fetch ===\n")
     fetch_ok = run_fetch(dry_run=args.dry_run)
     print()
 
-    print("=== Krok 0b: Korekty z aplikacji → main.py learn ===\n")
+    print("=== Step 0b: Corrections from the app → main.py learn ===\n")
     run_learn_from_budget(dry_run=args.dry_run)
     print()
 

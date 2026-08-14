@@ -46,12 +46,12 @@ def _make_db(root):
 def test_stale_fetch_flags_old_last_fetch():
     root = _tmp_root()
     # State keys are full IBANs, so the config has to say which country.
-    cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Testowe"},
+    cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Checking"},
            "enable_banking": {"default_aspsp": {"country": "PL"}}}
     old = (date.today() - timedelta(days=3)).isoformat()
     (root / ".bank_sync_state.json").write_text(json.dumps({"last_fetch": {"PL1111": old}}))
     findings = self_checker.check_stale_fetch(cfg)
-    assert any("Testowe" in f for f in findings), findings
+    assert any("Checking" in f for f in findings), findings
 
     recent = date.today().isoformat()
     (root / ".bank_sync_state.json").write_text(json.dumps({"last_fetch": {"PL1111": recent}}))
@@ -63,7 +63,7 @@ def test_yesterdays_checkpoint_is_the_healthy_state_not_a_finding():
     """A successful sync checkpoints *yesterday* — it only fetches fully booked
     days — so one day of lag is normal, not stale."""
     root = _tmp_root()
-    cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Testowe"},
+    cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Checking"},
            "enable_banking": {"default_aspsp": {"country": "PL"}}}
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     (root / ".bank_sync_state.json").write_text(json.dumps({"last_fetch": {"PL1111": yesterday}}))
@@ -77,7 +77,7 @@ def test_two_days_is_only_stale_once_todays_sync_has_run():
     nothing is wrong yet. Running the audit by hand in the morning used to
     report every account as stale."""
     root = _tmp_root()
-    cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Testowe"},
+    cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Checking"},
            "enable_banking": {"default_aspsp": {"country": "PL"}}}
     two_days = (date.today() - timedelta(days=2)).isoformat()
     (root / ".bank_sync_state.json").write_text(json.dumps({"last_fetch": {"PL1111": two_days}}))
@@ -88,7 +88,7 @@ def test_two_days_is_only_stale_once_todays_sync_has_run():
 
     # It has run, and the checkpoint still didn't move: that is a real problem.
     (root / "logs" / f".success_master_pi_{date.today().isoformat()}").touch()
-    assert any("Testowe" in f for f in self_checker.check_stale_fetch(cfg))
+    assert any("Checking" in f for f in self_checker.check_stale_fetch(cfg))
 
 
 def test_allegro_is_not_flagged_before_todays_sync_has_run():
@@ -194,7 +194,7 @@ def test_orphan_raw_pulls_flags_missing_commit():
     con = _make_db(root)
     con.commit()
     con.close()
-    cfg = {"account_names": {"1111": "Testowe"}}
+    cfg = {"account_names": {"1111": "Checking"}}
 
     raw = {"transactions": [
         {"transaction_amount": {"amount": "10.00"}},
@@ -205,11 +205,11 @@ def test_orphan_raw_pulls_flags_missing_commit():
     old_time = time.time() - 86400  # a day ago — older than the 6h threshold
     os.utime(f, (old_time, old_time))
     findings = self_checker.check_orphan_raw_pulls(cfg)
-    assert any("Testowe" in x for x in findings), findings
+    assert any("Checking" in x for x in findings), findings
 
     con = sqlite3.connect(str(root / "budget.db"))
     con.execute("INSERT INTO transactions (date, amount, account, tx_type) VALUES "
-                "('2026-07-01', 10.0, 'Testowe', 'Expense')")
+                "('2026-07-01', 10.0, 'Checking', 'Expense')")
     con.commit()
     con.close()
     findings = self_checker.check_orphan_raw_pulls(cfg)

@@ -3,7 +3,7 @@
 watchdog.py – did today's master_pi.py finish? The run leaves a marker at
 logs/.success_master_pi_{date}; without one, run it again.
 
-Uruchamiany przez money-badger-sync-watchdog.timer o 14:30/17:30/23:30 —
+Run by money-badger-sync-watchdog.timer at 14:30/17:30/23:30 —
 catches a scheduled run that never finished — the app briefly down, the
 network gone. Safe to run repeatedly on the same day: fetch and push are
 idempotent, deduplicating on hash/eb_id.

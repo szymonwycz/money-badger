@@ -18,7 +18,7 @@ if __name__ == "__main__":
             REPORT_FILE.unlink()
             print("Report sent and removed.")
         else:
-            # ponytail: plik zostaje, ale jutrzejszy self_checker.py i tak go
+            # ponytail: the file stays put and is not retried —
             # the next audit overwrites it with fresher data before this sender
             # runs again, so one Telegram outage costs one morning report rather
             # than building a backlog. Add a retry queue only if that starts to hurt.

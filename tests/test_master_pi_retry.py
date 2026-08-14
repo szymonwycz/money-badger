@@ -48,7 +48,7 @@ def test_unknown_failure_reason_allows_retry():
     dead-end strings — that's exactly the case retry exists for."""
     summary_file = _use_tmp_summary()
     summary_file.write_text(json.dumps({
-        "failed_reasons": {"Nasze": "Connection refused (app)"},
+        "failed_reasons": {"Checking": "Connection refused (app)"},
     }))
     assert master_pi._only_non_retryable_failures() is False
 

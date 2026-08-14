@@ -1410,7 +1410,7 @@ def get_accounts():
 @app.route('/api/accounts/last-dates')
 def accounts_last_dates():
     """Latest transaction date per account — the bank fetcher uses it as
-    fallback, gdy brakuje lokalnego stanu last_fetch (np. po reset/migracji)."""
+    fallback when the local last_fetch state is missing (after a reset or a migration)."""
     db = get_db()
     rows = db.execute("SELECT account, date FROM transactions WHERE account != ''").fetchall()
     best = {}

@@ -47,7 +47,7 @@ function renderItem(e) {
     load();
   });
 
-  // Opis blur — zapisz
+  // Description blur — save
   row.querySelector('.le-item-desc-input').addEventListener('blur', async ev => {
     await api(`/api/big-expenses/${e.id}`, {
       method: 'PUT',
@@ -60,7 +60,7 @@ function renderItem(e) {
     });
   });
 
-  // Kwota blur — zapisz
+  // Amount blur — save
   row.querySelector('.le-item-amount-input').addEventListener('blur', async ev => {
     await api(`/api/big-expenses/${e.id}`, {
       method: 'PUT',

@@ -1,6 +1,6 @@
 """The nightly self-checker — audits data that has already been fetched (SQLite,
 logs, .bank_sync_state.json, raw_pulls/) without a single call to Enable
-Banking. Nigdy nie importuje banks.enable_banking — to gwarancja przez
+Banking. It never imports banks.enable_banking — that guarantee holds
 by construction, not by convention: the daily ASPSP quota is shared with the
 regular sync, and the audit must not spend a call the sync needs.
 
@@ -162,10 +162,10 @@ def check_orphan_raw_pulls(cfg: dict) -> list[str]:
             except (json.JSONDecodeError, OSError):
                 continue
             raw_txs = body.get("transactions") or []
-            # Ta sama konwersja znaku co EnableBankingFetcher._convert_tx,
-            # celowo zduplikowana (nie importujemy banks.enable_banking tutaj
+            # The same sign conversion as EnableBankingFetcher._convert_tx,
+            # duplicated on purpose: banks.enable_banking is not imported here
             # under any circumstances, so no audit path can accidentally drag in
-            # code that calls the bank).
+            # code that calls the bank.
             nonzero = [
                 t for t in raw_txs
                 if float(((t.get("transaction_amount") or {}).get("amount", 0)) or 0) != 0

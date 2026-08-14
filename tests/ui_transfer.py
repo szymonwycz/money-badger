@@ -3,6 +3,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 BASE = os.environ.get('BASE', 'http://127.0.0.1:5055')
 SHOTS = os.environ.get('SHOTS', 'shots')
+# Runs against a live instance, so it needs two real account names from that
+# install: ACCT=<from> ACCT_TO=<to> python tests/ui_transfer.py
+ACCT    = os.environ.get('ACCT', 'Main')
+ACCT_TO = os.environ.get('ACCT_TO', 'Cash')
 Path(SHOTS).mkdir(parents=True, exist_ok=True)
 errors = []
 def check(n, c, d=''):
@@ -23,23 +27,23 @@ with sync_playwright() as p:
     check('toggle: button label', m.locator('#m-add-btn').inner_text() == 'ADD TRANSFER')
 
     m.fill('#m-amount', '123')
-    m.select_option('#m-account', 'Nasze')
-    m.select_option('#m-account-to', 'Cash')
+    m.select_option('#m-account', ACCT)
+    m.select_option('#m-account-to', ACCT_TO)
     m.fill('#m-desc', 'TRANSFER-UI-TEST')
     m.click('#m-add-btn'); m.wait_for_timeout(700)
     check('transfer: added', 'Added' in m.locator('#m-add-status').inner_text())
 
     # same-account guard
     m.fill('#m-amount', '5')
-    m.select_option('#m-account', 'Nasze')
-    m.select_option('#m-account-to', 'Nasze')
+    m.select_option('#m-account', ACCT)
+    m.select_option('#m-account-to', ACCT)
     m.click('#m-add-btn'); m.wait_for_timeout(400)
     check('transfer: same-account blocked', 'different' in m.locator('#m-add-status').inner_text())
 
     # verify in API + detail view is transfer-safe (readonly desc)
     txs = json.load(urllib.request.urlopen(f'{BASE}/api/transactions?month=7&year=2026'))
     t = next((x for x in txs if 'TRANSFER-UI-TEST' in (x['description'] or '')), None)
-    check('api: transfer persisted', t is not None and t['tx_type'] == 'Money Transfer' and t['account_to'] == 'Cash')
+    check('api: transfer persisted', t is not None and t['tx_type'] == 'Money Transfer' and t['account_to'] == ACCT_TO)
 
     m.click('button[data-panel="panel-txns"]'); m.wait_for_timeout(700)
     m.locator('.m-tx-row', has_text='123').first.click(); m.wait_for_timeout(400)

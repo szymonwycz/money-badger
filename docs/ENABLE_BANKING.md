@@ -145,7 +145,7 @@ sudo systemctl enable --now money-badger-sync.timer
 
 ## When it stops working
 
-**"brak sesji — uruchom: python main.py fetch-setup"** — the consent expired or
+**"no session — run: python main.py fetch-setup"** — the consent expired or
 was revoked. Re-run `fetch-setup` for that account.
 
 **"ASPSP daily limit reached"** — the quota. It resets at midnight in the bank's

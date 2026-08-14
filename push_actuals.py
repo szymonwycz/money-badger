@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-push_actuals.py — czyta Export/ CSVy i pushuje transakcje do aplikacji.
+push_actuals.py — reads the CSVs in Export/ and pushes the transactions to the app.
 Run by master_pi.py after every import.
 """
 import csv
@@ -114,7 +114,7 @@ def pull_corrections(corrections_dir: Path):
     # Anything beyond the header row?
     lines = [l for l in content.strip().splitlines() if l.strip()]
     if len(lines) <= 1:
-        print("  [push_actuals] Brak nowych korekt.")
+        print("  [push_actuals] No new corrections.")
         return 0
 
     corrections_dir.mkdir(parents=True, exist_ok=True)
@@ -122,14 +122,14 @@ def pull_corrections(corrections_dir: Path):
     dest = corrections_dir / f"budget_corrections_{ts}.csv"
     dest.write_text(content, encoding="utf-8")
     (corrections_dir / f"budget_corrections_{ts}.ids").write_text(ids, encoding="utf-8")
-    print(f"  [push_actuals] Zapisano {len(lines)-1} korekt → {dest.name}")
+    print(f"  [push_actuals] Saved {len(lines)-1} corrections → {dest.name}")
     return len(lines) - 1
 
 
 def mark_corrections_synced():
     try:
         post_json("/api/corrections/mark-synced", {})
-        print("  [push_actuals] Korekty oznaczone jako synced.")
+        print("  [push_actuals] Corrections marked as synced.")
     except Exception as e:
         print(f"  [push_actuals] Could not mark corrections as synced: {e}")
 
@@ -140,7 +140,7 @@ def push(corrections_dir: Path = None):
     if corrections_dir:
         n_corrections = pull_corrections(corrections_dir)
 
-    # 2. Pushuj transakcje
+    # 2. Push transactions
     state        = load_state()
     pushed_set   = set(state.get("pushed_hashes", []))
     csv_files    = sorted(EXPORT_DIR.glob("moneypro_*.csv"))
@@ -165,7 +165,7 @@ def push(corrections_dir: Path = None):
 
     new_txs = [tx for tx in all_txs if tx["hash"] not in pushed_set]
     if not new_txs:
-        print("  [push_actuals] Brak nowych transakcji.")
+        print("  [push_actuals] No new transactions.")
     else:
         try:
             result = post_json("/api/transactions/bulk", new_txs)

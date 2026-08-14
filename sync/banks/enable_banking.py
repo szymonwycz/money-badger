@@ -92,7 +92,8 @@ RAW_PULL_RETENTION_DAYS = 90
 def _dump_raw_pull(state_file: str, bare_iban: str, date_from: str, date_to: str, body: dict) -> None:
     """Write the bank's raw response to raw_pulls/, before any conversion or
     categorization, so debugging or reprocessing never costs another API call
-    (dzienny limit ASPSP na fetch w tle, patrz komentarz przy 429 w fetch())."""
+    (the ASPSP daily limit applies to background fetches too — see the 429
+    comment in fetch())."""
     raw_dir = Path(state_file).parent.parent / "raw_pulls"
     raw_dir.mkdir(exist_ok=True)
     cutoff = time.time() - RAW_PULL_RETENTION_DAYS * 86400
@@ -150,7 +151,7 @@ class EnableBankingFetcher:
         one bank. Both come from config.json.
         """
         aspsp_by_iban = aspsp_by_iban or {}
-        print("\n=== Enable Banking: autoryzacja kont ===\n")
+        print("\n=== Enable Banking: authorizing accounts ===\n")
         state = self._load_state()
         sessions = state.setdefault("sessions", {})
 
@@ -162,10 +163,10 @@ class EnableBankingFetcher:
 
             aspsp = aspsp_by_iban.get(full_iban) or default_aspsp
             if not aspsp or not aspsp.get("name"):
-                print(f"  [{full_iban[-10:]}...] pomijam: brak banku w config.json "
-                      f"(ustaw enable_banking.aspsp_names lub enable_banking.default_aspsp).")
+                print(f"  [{full_iban[-10:]}...] skipping: no bank in config.json "
+                      f"(set enable_banking.aspsp_names or enable_banking.default_aspsp).")
                 continue
-            print(f"\nAutoryzacja konta: {full_iban} ({aspsp['name']})")
+            print(f"\nAuthorizing account: {full_iban} ({aspsp['name']})")
             body = {
                 "access": {
                     "valid_until": (datetime.utcnow() + timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -188,7 +189,7 @@ class EnableBankingFetcher:
             params = parse_qs(parsed.query)
             auth_code = params.get("code", [None])[0]
             if not auth_code:
-                print(f"  Brak parametru 'code' w URL — pomijam.")
+                print(f"  No 'code' parameter in the URL — skipping.")
                 continue
 
             r2 = requests.post(
@@ -222,7 +223,7 @@ class EnableBankingFetcher:
             print(f"  OK. session_id: {session_id}, account_id: {account_id}")
 
         self._save_state(state)
-        print("\nGotowe! Stan zapisany.")
+        print("\nDone. State saved.")
 
     def get_balances(self, ibans: list[str]) -> dict[str, float | None]:
         """Fetch current balance per IBAN. Returns {bare_iban: amount or None on failure}."""
@@ -239,7 +240,7 @@ class EnableBankingFetcher:
             session_info = sessions.get(full_iban)
             account_id   = session_info.get("account_id") if session_info else None
             if not account_id:
-                print(f"  [{bare_iban[-10:]}...] brak sesji — uruchom: python main.py fetch-setup")
+                print(f"  [{bare_iban[-10:]}...] no session — run: python main.py fetch-setup")
                 results[bare_iban] = None
                 continue
 
@@ -319,7 +320,7 @@ class EnableBankingFetcher:
         permanently lost that day's transactions, because a retry would see
         "already up to date" and skip straight past them. This bit us for real
         on 2026-07-13 (Anthropic billing) and again on 2026-07-12 (unrelated
-        cause) — see raw/2026-07-13-router-b535-awaria-i-money-badger-diagnoza-salda.md.
+        cause).
         """
         state = self._load_state()
         sessions = state.get("sessions", {})
@@ -338,14 +339,14 @@ class EnableBankingFetcher:
 
             session_info = sessions.get(full_iban)
             if not session_info:
-                print(f"  [{bare_iban[-10:]}...] brak sesji — uruchom: python main.py fetch-setup")
+                print(f"  [{bare_iban[-10:]}...] no session — run: python main.py fetch-setup")
                 self.last_skipped.append(bare_iban)
                 self.skip_reasons[bare_iban] = "no EB session (run fetch-setup)"
                 continue
 
             account_id = session_info.get("account_id")
             if not account_id:
-                print(f"  [{bare_iban[-10:]}...] brak account_id — uruchom ponownie fetch-setup")
+                print(f"  [{bare_iban[-10:]}...] no account_id — run fetch-setup again")
                 self.last_skipped.append(bare_iban)
                 self.skip_reasons[bare_iban] = "no account_id (run fetch-setup)"
                 continue
@@ -369,7 +370,7 @@ class EnableBankingFetcher:
             elif use_smart_window and full_iban in fallback_dates:
                 next_day = (date.fromisoformat(fallback_dates[full_iban]) + timedelta(days=1)).isoformat()
                 date_from = max(next_day, cap_date)
-                print(f"  [{bare_iban[-10:]}...] brak lokalnego stanu — wznawiam od ostatniej transakcji w aplikacji ({fallback_dates[full_iban]})")
+                print(f"  [{bare_iban[-10:]}...] no local state — resuming from the app's last transaction ({fallback_dates[full_iban]})")
             else:
                 date_from = cap_date
 
@@ -377,7 +378,7 @@ class EnableBankingFetcher:
                 print(f"  [{bare_iban[-10:]}...] already up to date (last_fetch={last_fetches.get(full_iban, '—')}), skipping")
                 continue
 
-            print(f"  Pobieranie {bare_iban[-10:]}... (od {date_from} do {yesterday})")
+            print(f"  Fetching {bare_iban[-10:]}... (from {date_from} to {yesterday})")
             params = {"date_from": date_from, "date_to": yesterday}
             r = requests.get(
                 f"{EB_BASE}/accounts/{account_id}/transactions",
@@ -387,8 +388,8 @@ class EnableBankingFetcher:
             )
 
             if r.status_code == 429:
-                # Patrz komentarz w get_balances() — dzienny limit ASPSP, nie
-                # throttling. Retrying in 60s only spends another call from the
+                # See the comment in get_balances() — this is the ASPSP daily
+                # limit, not throttling. Retrying in 60s only spends another call from the
                 # same quota, so skip this account and try the rest.
                 print(f"  [{bare_iban[-10:]}...] ASPSP limit spent for today — try in a few hours or tomorrow")
                 _mark_dead_today(self.state_file, state, full_iban, 429)
@@ -407,7 +408,7 @@ class EnableBankingFetcher:
             body = r.json()
             raw_txs = body.get("transactions", [])
             _dump_raw_pull(self.state_file, bare_iban, date_from, yesterday, body)
-            print(f"  → {len(raw_txs)} transakcji")
+            print(f"  → {len(raw_txs)} transactions")
 
             converted = [self._convert_tx(tx, bare_iban) for tx in raw_txs]
 

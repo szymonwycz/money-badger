@@ -92,4 +92,4 @@ const balanceRes = await api('/api/accounts/7', { method: 'PUT', body: '{"balanc
 assert.deepEqual(balanceRes, { error: 'offline' });
 assert.equal(loadQueue().length, 0, 'a noQueue write must never land in the queue');
 
-console.log('OK — wszystkie testy offline queue przeszły');
+console.log('OK — all offline queue tests passed');

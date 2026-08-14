@@ -542,10 +542,10 @@ tr[tabindex]:focus-visible, div[tabindex]:focus-visible {
 .tx-date   { color: var(--text2); white-space: nowrap; font-size: var(--fs-base); }
 .tx-amount { color: var(--yellow); white-space: nowrap; font-weight: 600; text-align: right; }
 .tx-acct   { color: var(--text2); white-space: nowrap; }
-/* OPIS: wraps long descriptions, does not truncate */
+/* DESCRIPTION: wraps long descriptions, does not truncate */
 .tx-desc   { max-width: 280px; word-wrap: break-word; font-size: var(--fs-base); }
-/* KATEGORIA: nowrap, muted */
-/* PODKATEGORIA: truncates with ellipsis, does not wrap */
+/* CATEGORY: nowrap, muted */
+/* SUBCATEGORY: truncates with ellipsis, does not wrap */
 
 .tx-table select {
   background: transparent;
@@ -775,7 +775,7 @@ tr[tabindex]:focus-visible, div[tabindex]:focus-visible {
   line-height: 1.5;
 }
 
-/* FIX: was flex-wrap:wrap which caused SILNIK/STBY result to drop to new line */
+/* FIX: was flex-wrap:wrap which caused the engine-runs/standby result to drop to a new line */
 .calc-row {
   display: flex;
   align-items: center;

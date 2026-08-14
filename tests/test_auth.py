@@ -153,21 +153,21 @@ def test_logout_ends_the_session(client):
 def test_admin_adds_a_person_who_can_then_sign_in(client):
     _login(client)
     assert client.post('/api/users',
-                       json={'username': 'ola', 'password': 'sekret1234'}).status_code == 200
+                       json={'username': 'ola', 'password': 'secret1234'}).status_code == 200
     client.get('/logout')
-    assert _login(client, 'ola', 'sekret1234').status_code == 302
+    assert _login(client, 'ola', 'secret1234').status_code == 302
     assert 'ola' in [u['username'] for u in _users()]
 
 
 def test_a_plain_person_cannot_manage_people(client):
     """Same budget, but adding and removing logins is the host's job."""
     _login(client)
-    client.post('/api/users', json={'username': 'basic.user', 'password': 'sekret1234'})
+    client.post('/api/users', json={'username': 'basic.user', 'password': 'secret1234'})
     client.get('/logout')
-    _login(client, 'basic.user', 'sekret1234')
+    _login(client, 'basic.user', 'secret1234')
     assert client.get('/api/users').status_code == 403
     assert client.post('/api/users',
-                       json={'username': 'sneaky', 'password': 'sekret1234'}).status_code == 403
+                       json={'username': 'sneaky', 'password': 'secret1234'}).status_code == 403
     assert client.delete(f'/api/users/{_id_of(ADMIN)}').status_code == 403
     assert 'sneaky' not in [u['username'] for u in _users()]
 
@@ -175,13 +175,13 @@ def test_a_plain_person_cannot_manage_people(client):
 def test_new_accounts_are_validated(client):
     _login(client)
     assert client.post('/api/users',
-                       json={'username': 'a b', 'password': 'sekret1234'}).status_code == 400
+                       json={'username': 'a b', 'password': 'secret1234'}).status_code == 400
     assert client.post('/api/users',
                        json={'username': 'shorty', 'password': 'short'}).status_code == 400
     assert client.post('/api/users',
-                       json={'username': ADMIN, 'password': 'sekret1234'}).status_code == 409
+                       json={'username': ADMIN, 'password': 'secret1234'}).status_code == 409
     assert client.post('/api/users',
-                       json={'username': ADMIN.upper(), 'password': 'sekret1234'}).status_code == 409
+                       json={'username': ADMIN.upper(), 'password': 'secret1234'}).status_code == 409
 
 
 def test_an_admin_cannot_remove_their_own_account(client):
@@ -192,10 +192,10 @@ def test_an_admin_cannot_remove_their_own_account(client):
 
 def test_removing_a_person_keeps_their_transactions(client):
     _login(client)
-    client.post('/api/users', json={'username': 'leaver', 'password': 'sekret1234'})
+    client.post('/api/users', json={'username': 'leaver', 'password': 'secret1234'})
     uid = _id_of('leaver')
     client.get('/logout')
-    _login(client, 'leaver', 'sekret1234')
+    _login(client, 'leaver', 'secret1234')
     client.post('/api/transactions',
                 json={'date': '2044-03-15', 'amount': 10, 'description': 'lunch'})
     client.get('/logout')
@@ -210,7 +210,7 @@ def test_removing_a_person_keeps_their_transactions(client):
 
 def test_a_removed_account_loses_its_open_session(client):
     _login(client)
-    client.post('/api/users', json={'username': 'evicted', 'password': 'sekret1234'})
+    client.post('/api/users', json={'username': 'evicted', 'password': 'secret1234'})
     uid = _id_of('evicted')
     client.get('/logout')
 
@@ -218,7 +218,7 @@ def test_a_removed_account_loses_its_open_session(client):
     # already holds a request context open and nesting a second one breaks the
     # teardown order.
     theirs = badger.app.test_client()
-    _login(theirs, 'evicted', 'sekret1234')
+    _login(theirs, 'evicted', 'secret1234')
     assert theirs.get('/api/settings').status_code == 200
 
     _login(client)
@@ -237,28 +237,28 @@ def test_a_transaction_records_who_entered_it(client):
 
 def test_a_person_changes_their_own_password(client):
     _login(client)
-    client.post('/api/users', json={'username': 'pw.user', 'password': 'sekret1234'})
+    client.post('/api/users', json={'username': 'pw.user', 'password': 'secret1234'})
     client.get('/logout')
-    _login(client, 'pw.user', 'sekret1234')
+    _login(client, 'pw.user', 'secret1234')
 
     assert client.put('/api/account/password',
                       json={'current_password': 'wrong',
                             'password': 'nowehaslo123'}).status_code == 403
     assert client.put('/api/account/password',
-                      json={'current_password': 'sekret1234',
+                      json={'current_password': 'secret1234',
                             'password': 'short'}).status_code == 400
     assert client.put('/api/account/password',
-                      json={'current_password': 'sekret1234',
+                      json={'current_password': 'secret1234',
                             'password': 'nowehaslo123'}).status_code == 200
 
     client.get('/logout')
-    assert _login(client, 'pw.user', 'sekret1234').status_code == 401
+    assert _login(client, 'pw.user', 'secret1234').status_code == 401
     assert _login(client, 'pw.user', 'nowehaslo123').status_code == 302
 
 
 def test_an_admin_resets_a_forgotten_password(client):
     _login(client)
-    client.post('/api/users', json={'username': 'forgetful', 'password': 'sekret1234'})
+    client.post('/api/users', json={'username': 'forgetful', 'password': 'secret1234'})
     uid = _id_of('forgetful')
     assert client.put(f'/api/users/{uid}/password',
                       json={'password': 'resetowane12'}).status_code == 200

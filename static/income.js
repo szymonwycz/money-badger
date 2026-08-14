@@ -148,7 +148,7 @@ async function saveEntry(catId, changedField) {
   });
   toast('Saved');
 
-  // Zaktualizuj state lokalnie
+  // Update the local state
   const entry = state.entries.find(e => e.category_id === catId);
   if (entry) { entry.planned = planned; entry.received = received; entry.note = note; }
 
