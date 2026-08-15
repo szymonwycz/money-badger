@@ -99,7 +99,10 @@ PAYMENT_ID_RE = re.compile(r"Numer płatności\s+([0-9a-f-]{36})", re.IGNORECASE
 
 
 def parse_amount(s: str) -> float:
-    return float(s.replace(" ", "").replace(",", "."))
+    # Allegro separates thousands with a non-breaking space. PRICE_RE lets it
+    # through via [\d\s]*, because \s matches U+00A0, but .replace(" ", "")
+    # only strips U+0020 — so every order above 999 raised ValueError here.
+    return float(re.sub(r"\s", "", s).replace(",", "."))
 
 
 def parse_allegro_email(text: str) -> dict:
@@ -549,19 +552,31 @@ def main():
         print(f"  [orders] IMAP error: {e}")
         return
 
-    for shop, text in emails:
-        # An email already matched is never read again: with the model doing the
-        # reading, re-reading a 30-day window every run costs real money. An
-        # email that did not match is retried, because its transaction may only
-        # show up on the statement a day or two later.
-        digest = hashlib.md5(text.encode("utf-8", "replace")).hexdigest()
-        if digest in done:
-            continue
-        order = extract_order(shop, text, api_key, opts["local_currency"])
-        if order and match_and_categorize(shop, order, categories_tree, api_key, state, opts):
-            done.append(digest)
-
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    try:
+        for shop, text in emails:
+            # An email already matched is never read again: with the model doing the
+            # reading, re-reading a 30-day window every run costs real money. An
+            # email that did not match is retried, because its transaction may only
+            # show up on the statement a day or two later.
+            digest = hashlib.md5(text.encode("utf-8", "replace")).hexdigest()
+            if digest in done:
+                continue
+            try:
+                order = extract_order(shop, text, api_key, opts["local_currency"])
+            except Exception as e:
+                # Every shop shares this loop, so letting one unreadable email out
+                # would cost the whole run — including the shops that had already
+                # been paid for. Broad on purpose: a template changes, a model
+                # returns something unexpected, and neither is worth an abort.
+                print(f"  [orders] {shop}: could not read an email ({e}) — skipping it")
+                continue
+            if order and match_and_categorize(shop, order, categories_tree, api_key, state, opts):
+                done.append(digest)
+    finally:
+        # Written even when something escapes the loop. Otherwise a crash discards
+        # every digest collected in this run, and the next run pays the LLM again
+        # to read emails it has already read.
+        STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
 if __name__ == "__main__":

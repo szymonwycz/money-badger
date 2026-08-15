@@ -202,5 +202,56 @@ def test_allegro_is_parsed_not_sent_to_the_model(monkeypatch):
     assert order["order_id"] == "00000000-0000-4000-8000-000000000000"
 
 
+def test_a_price_above_a_thousand_is_read(monkeypatch):
+    """Allegro separates thousands with a non-breaking space. PRICE_RE accepts it,
+    so the raw "1\u00a0137,77" reached parse_amount, where .replace(" ", "") — which
+    only strips U+0020 — left it unparseable. The ValueError escaped the loop in
+    main() and took the rest of the run with it."""
+    monkeypatch.setattr(om.llm, "complete",
+                        lambda *a, **kw: pytest_fail("the Allegro path must not call the model"))
+    text = ("z dnia 10 sierpnia 2026, 09:15\nLampa ogrodowa\n1\u00a0137,77 z\u0142\n"
+            "Metoda dostawy\nRAZEM\n1\u00a0137,77 z\u0142\nNumer p\u0142atno\u015bci "
+            "00000000-0000-4000-8000-000000000001\n")
+    order = om.extract_order("Allegro", text, "key", "PLN")
+    assert order["total_paid"] == 1137.77, order["total_paid"]
+    assert order["items"] == [{"name": "Lampa ogrodowa", "price": 1137.77}], order["items"]
+
+
+def test_one_unreadable_email_does_not_cost_the_whole_run(monkeypatch, tmp_path):
+    """Every shop shares one loop, so an exception from a single email used to stop
+    the shops queued behind it. Worse, the digest cache is written after the loop:
+    escaping it discarded the digests of emails already read, and the next run paid
+    the model to read them again."""
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(om, "STATE_FILE", state_file)
+    monkeypatch.setattr(om, "load_env", lambda: {})
+    monkeypatch.setattr(om, "mailbox", lambda env: {"host": "imap.example.com"})
+    monkeypatch.setattr(om, "get_api_key", lambda env: "key")
+    monkeypatch.setattr(om, "load_config", lambda: {"order_matching": {
+        "shops": {"Allegro": {"folder": "Allegro"}, "Amazon": {"folder": "Amazon"}}}})
+    monkeypatch.setattr(om, "get_json", lambda path: CATEGORIES)
+    monkeypatch.setattr(om, "fetch_shop_emails",
+                        lambda mbox, shops: [("Allegro", "unreadable"), ("Amazon", "readable")])
+
+    def extract(shop, text, api_key, currency):
+        if text == "unreadable":
+            raise ValueError("could not convert string to float: '1\u00a0137.77'")
+        return {"total_paid": 49.99}
+    monkeypatch.setattr(om, "extract_order", extract)
+
+    read = []
+
+    def matcher(shop, order, tree, key, state, opts):
+        read.append(shop)
+        return True
+    monkeypatch.setattr(om, "match_and_categorize", matcher)
+
+    om.main()
+
+    assert read == ["Amazon"], f"the shop behind the bad email was skipped: {read}"
+    assert len(json.loads(state_file.read_text())["done"]) == 1, \
+        "the digest cache must survive the bad email, or the next run pays twice"
+
+
 def pytest_fail(msg):
     raise AssertionError(msg)

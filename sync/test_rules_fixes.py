@@ -109,3 +109,33 @@ def test_example_rules_file_is_well_formed():
         assert all(isinstance(k, str) and isinstance(v, str) for k, v in rules[section].items())
     for p in rules["patterns"]:
         assert set(p) == {"pattern", "category", "priority"}, p
+
+
+def test_a_marketplace_charge_waits_for_the_email_instead_of_being_guessed():
+    """The card charge names the marketplace, not the goods — sync/order_match.py
+    fills that in from the order confirmation. With no rule matching, apply_rules
+    returned None and the charge went to the LLM, which guessed. Any guess sets
+    category_id, which drops the row out of /api/transactions/unreviewed — the list
+    order_match searches — so guessing quietly prevented the enrichment.
+
+    The label must stay truthy: categorize_transactions only skips the LLM for a
+    truthy result, so returning None here would restore the guessing in silence."""
+    empty = {"keywords": {}, "merchant_map": {}, "patterns": []}
+    shops = ("Allegro", "Amazon")
+    charge = "VISA PLAT 000000******1234 P\u0141ATNO\u015a\u0106 KART\u0104 122.35 PLN  Allegro Poznan"
+
+    assert main.apply_rules(charge, "", -122.35, empty, shops) == "CHECK ME"
+    assert main.apply_rules("AMAZON EU SARL", "", -49.99, empty, shops) == "CHECK ME"
+
+    # A learned rule must not win over the guard either.
+    with_rule = {"keywords": {"allegro": "Groceries"}, "merchant_map": {}, "patterns": []}
+    assert main.apply_rules(charge, "", -122.35, with_rule, shops) == "CHECK ME"
+
+    # A shop that is not configured is none of the guard's business.
+    assert main.apply_rules(charge, "", -122.35, empty, ("Amazon",)) is None
+
+
+def test_shop_names_falls_back_to_the_same_default_as_order_match():
+    assert main.shop_names({}) == ("Allegro",)
+    assert main.shop_names({"order_matching": {"shops": {"Amazon": {}, "eBay": {}}}}) \
+        == ("Amazon", "eBay")

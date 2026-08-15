@@ -337,7 +337,15 @@ def save_rules(rules: dict):
     RULES_FILE.write_text(json.dumps(rules, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def apply_rules(title: str, counterpart: str, amount: float, rules: dict) -> str | None:
+def shop_names(cfg: dict) -> tuple:
+    """Shops whose charges sync/order_match.py enriches from the confirmation
+    email. The default mirrors order_match's own; importing it from there would
+    be circular, because that module imports this one."""
+    return tuple((cfg.get("order_matching") or {}).get("shops") or {"Allegro": {}})
+
+
+def apply_rules(title: str, counterpart: str, amount: float, rules: dict,
+                shops: tuple = ()) -> str | None:
     if amount > 0:
         return None
 
@@ -345,6 +353,17 @@ def apply_rules(title: str, counterpart: str, amount: float, rules: dict) -> str
     # keywords ending in a space match at the end of the title — "bp " (BP station)
     # matched "exchanged to gbp " and filed every Revolut FX under Car: Fuel.
     text = f"{title} {counterpart}".lower().strip()
+
+    # A marketplace charge names the marketplace, not the goods — sync/order_match.py
+    # fills that in from the order confirmation email. Guessing here is worse than a
+    # wrong category: any category at all sets category_id, which drops the row out
+    # of /api/transactions/unreviewed — the very list order_match searches for
+    # candidates — so a guess silently prevents the enrichment that would have been
+    # right. Returning a truthy label is what skips the LLM (see
+    # categorize_transactions), and app.py maps this one to a NULL category_id.
+    for shop in shops:
+        if shop.lower() in text:
+            return "CHECK ME"
 
     for p in rules.get("patterns", []):
         if p["pattern"].lower() in text:
@@ -424,6 +443,7 @@ def categorize_transactions(transactions: list, cfg: dict, api_key: str) -> list
     rules      = load_rules()
     own_ibans  = cfg["own_ibans"]
     batch_size = cfg.get("batch_size", 30)
+    shops      = shop_names(cfg)
 
     pre_categorized: dict[int, dict] = {}
 
@@ -436,7 +456,7 @@ def categorize_transactions(transactions: list, cfg: dict, api_key: str) -> list
     for i, tx in enumerate(transactions):
         if i in pre_categorized:
             continue
-        cat = apply_rules(tx["title"], tx["counterpart"], tx["amount"], rules)
+        cat = apply_rules(tx["title"], tx["counterpart"], tx["amount"], rules, shops)
         if cat:
             pre_categorized[i] = {"category": cat, "note": ""}
 
