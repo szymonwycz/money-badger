@@ -365,6 +365,13 @@ function fmtDayMonth(iso) {
   return `${d}/${m}`;
 }
 
+function txCatLabel(tx) {
+  if (tx.income_category_id) return tx.income_cat_name || '—';
+  if (tx.cat_name) return tx.parent_name ? `${tx.parent_name} › ${tx.cat_name}` : tx.cat_name;
+  if (tx.tx_type === 'Money Transfer') return 'Transfer';
+  return '—';
+}
+
 function clearTxFilter() {
   state.txFilterCategoryId = null;
   document.getElementById('m-tx-filter').style.display = 'none';
@@ -432,9 +439,15 @@ function renderTxList() {
     const row = document.createElement('div');
     row.className = 'm-tx-row';
     row.innerHTML = `
-      <span class="date">${fmtDayMonth(tx.date)}</span>
-      <span class="amount" style="color:${txColor(tx)}">${fmtNum(Math.abs(tx.amount))}</span>
-      <span class="acct">${esc(tx.account || '—')}</span>
+      <div class="top">
+        <span class="date">${fmtDayMonth(tx.date)}</span>
+        <span class="amount" style="color:${txColor(tx)}">${fmtNum(Math.abs(tx.amount))}</span>
+        <span class="cat">${esc(txCatLabel(tx))}</span>
+      </div>
+      <div class="meta">
+        <span class="acct">${esc(tx.account || '—')}</span>
+        ${tx.description ? `<span class="desc">${esc(tx.description)}</span>` : ''}
+      </div>
     `;
     row.addEventListener('click', () => openTxDetail(tx));
     el.appendChild(row);
