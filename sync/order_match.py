@@ -68,7 +68,7 @@ BASE_DIR = Path(__file__).parent
 sys.path.insert(0, str(BASE_DIR))
 import llm  # noqa: E402
 from main import (load_env, load_config, get_api_key, _categorize_batch,  # noqa: E402
-                  validate_category)
+                  validate_category, load_rules, apply_rules)
 sys.path.insert(0, str(BASE_DIR.parent))
 import budget_client  # noqa: E402
 from logging_setup import start_logging  # noqa: E402
@@ -97,12 +97,32 @@ OFFER_ID_RE   = re.compile(r"^\(\d+\)$")
 DATE_RE       = re.compile(r"z dnia (\d{1,2}) (\w+) (\d{4}),\s*(\d{2}):(\d{2})")
 PAYMENT_ID_RE = re.compile(r"Numer płatności\s+([0-9a-f-]{36})", re.IGNORECASE)
 
+# One basket can span several sellers. That email has no "RAZEM" line — it
+# totals as "Kwota za zakupy" / "Razem z dostawą" and lists any coupon
+# separately. Both layouts do carry a "Płatność" block with the amount
+# actually taken off the card, coupon already deducted — and that is the
+# figure on the statement, so that is what we match against.
+ITEMS_END_LINES = ("RAZEM", "Kwota za zakupy", "Płatność")
+SELLER_RE = re.compile(r"^od \S")
+
 
 def parse_amount(s: str) -> float:
     # Allegro separates thousands with a non-breaking space. PRICE_RE lets it
     # through via [\d\s]*, because \s matches U+00A0, but .replace(" ", "")
     # only strips U+0020 — so every order above 999 raised ValueError here.
     return float(re.sub(r"\s", "", s).replace(",", "."))
+
+
+def _amount_after(lines: list, label: str) -> float | None:
+    """The amount on the line right after the given label, or None."""
+    if label not in lines:
+        return None
+    i = lines.index(label)
+    if i + 1 < len(lines):
+        pm = PRICE_RE.match(lines[i + 1])
+        if pm:
+            return parse_amount(pm.group(1))
+    return None
 
 
 def parse_allegro_email(text: str) -> dict:
@@ -123,10 +143,21 @@ def parse_allegro_email(text: str) -> dict:
     lines = [l.strip() for l in text.splitlines()]
     clean = [l for l in lines if l and not URL_RE.match(l) and not OFFER_ID_RE.match(l)]
 
-    items, pending_name = [], None
+    # There is one product block per seller, each ending at "Metoda dostawy";
+    # the next one opens with "od <seller>". Breaking at the first delivery
+    # header took the products of the first seller and nothing else.
+    items, pending_name, in_delivery = [], None, False
     for l in clean:
-        if l.startswith("Metoda dostawy"):
+        if l in ITEMS_END_LINES:
             break
+        if l.startswith("Metoda dostawy"):
+            in_delivery, pending_name = True, None
+            continue
+        if SELLER_RE.match(l):
+            in_delivery, pending_name = False, None
+            continue
+        if in_delivery:
+            continue
         pm = PRICE_RE.match(l)
         if pm:
             if pending_name:
@@ -135,12 +166,9 @@ def parse_allegro_email(text: str) -> dict:
         else:
             pending_name = l
 
-    razem_idx = next((i for i, l in enumerate(clean) if l == "RAZEM"), None)
-    total_paid = None
-    if razem_idx is not None and razem_idx + 1 < len(clean):
-        pm = PRICE_RE.match(clean[razem_idx + 1])
-        if pm:
-            total_paid = parse_amount(pm.group(1))
+    total_paid = _amount_after(clean, "Płatność")
+    if total_paid is None:
+        total_paid = _amount_after(clean, "RAZEM")
 
     pid_m = PAYMENT_ID_RE.search(text)
     payment_id = pid_m.group(1) if pid_m else None
@@ -457,7 +485,7 @@ def to_local_amount(order: dict, opts: dict) -> tuple:
 
 
 def match_and_categorize(shop: str, order: dict, categories_tree: list,
-                         api_key: str, state: dict, opts: dict) -> bool:
+                         api_key: str, state: dict, opts: dict, rules: dict) -> bool:
     """True when the order was matched to a transaction and written back."""
     tag = shop.lower()
     oid = order.get("order_id")
@@ -466,7 +494,12 @@ def match_and_categorize(shop: str, order: dict, categories_tree: list,
     key = oid if shop == "Allegro" else f"{shop}:{oid}"
     if not oid or key in state.get("matched", []):
         return False
-    if not order.get("total_paid") or not order.get("order_date") or not order.get("items"):
+    # Returning quietly on an incomplete order hid a real bug for a month:
+    # multi-seller Allegro emails have no "RAZEM" line, so they fell out here
+    # without a single line in the log. Say what was missing.
+    missing = [k for k in ("total_paid", "order_date", "items") if not order.get(k)]
+    if missing:
+        print(f"  [{tag}] {oid}: incomplete order (missing: {', '.join(missing)}) — skipping")
         return False
 
     expected, tolerance = to_local_amount(order, opts)
@@ -502,8 +535,18 @@ def match_and_categorize(shop: str, order: dict, categories_tree: list,
         "counterpart": shop,
         "_transfer": False,
     }
-    categorized = _categorize_batch([fake_tx], api_key)
-    category = validate_category(categorized[0]["category"])
+    # rules.json grows out of the corrections you make on these very orders
+    # (main.py learn), but this path went straight to the model and never read
+    # the rules — so the same product came back to CHECK ME every month. The
+    # counterpart is deliberately empty: apply_rules sends anything naming a
+    # configured shop to CHECK ME, which is the right call on a bare card
+    # descriptor and the wrong one here, where the product names are known.
+    category = apply_rules(item_names, "", -tx["amount"], rules)
+    if category:
+        category = validate_category(category)
+    else:
+        categorized = _categorize_batch([fake_tx], api_key)
+        category = validate_category(categorized[0]["category"])
     cat_id = find_category_id(categories_tree, category)
 
     # The description (product names) is always written — it makes manual review
@@ -552,6 +595,8 @@ def main():
         print(f"  [orders] IMAP error: {e}")
         return
 
+    rules = load_rules()
+
     try:
         for shop, text in emails:
             # An email already matched is never read again: with the model doing the
@@ -570,7 +615,8 @@ def main():
                 # returns something unexpected, and neither is worth an abort.
                 print(f"  [orders] {shop}: could not read an email ({e}) — skipping it")
                 continue
-            if order and match_and_categorize(shop, order, categories_tree, api_key, state, opts):
+            if order and match_and_categorize(shop, order, categories_tree, api_key,
+                                              state, opts, rules):
                 done.append(digest)
     finally:
         # Written even when something escapes the loop. Otherwise a crash discards

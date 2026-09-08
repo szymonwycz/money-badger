@@ -97,7 +97,7 @@ def test_foreign_currency_matches_within_the_fx_band(monkeypatch):
     order = om.extract_order("Amazon", "body", "key", "PLN")
     state = {"matched": []}
 
-    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", state, OPTS) is True
+    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", state, OPTS, {}) is True
     assert puts[0][0] == "/api/transactions/11"
     assert puts[0][1]["category_id"] == 7
     # Both amounts on the row: the converted one is on the statement, the
@@ -106,7 +106,7 @@ def test_foreign_currency_matches_within_the_fx_band(monkeypatch):
     assert state["matched"] == ["Amazon:302-1234567-1234567"]
 
     # Same order again on the next run changes nothing.
-    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", state, OPTS) is False
+    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", state, OPTS, {}) is False
     assert len(puts) == 1
 
 
@@ -116,7 +116,7 @@ def test_unknown_rate_leaves_the_order_alone(monkeypatch):
     order = om.extract_order("AliExpress", "body", "key", "PLN")
     state = {"matched": []}
 
-    assert om.match_and_categorize("AliExpress", order, CATEGORIES, "key", state, OPTS) is False
+    assert om.match_and_categorize("AliExpress", order, CATEGORIES, "key", state, OPTS, {}) is False
     assert puts == [] and state["matched"] == []
 
 
@@ -126,7 +126,7 @@ def test_two_candidates_in_the_band_go_to_manual_review(monkeypatch):
     order = om.extract_order("Amazon", "body", "key", "PLN")
     state = {"matched": []}
 
-    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", state, OPTS) is False
+    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", state, OPTS, {}) is False
     assert puts == [] and state["matched"] == []
 
 
@@ -136,7 +136,7 @@ def test_local_currency_still_needs_an_exact_amount(monkeypatch):
     order = om.extract_order("Temu", "body", "key", "PLN")
     state = {"matched": []}
 
-    assert om.match_and_categorize("Temu", order, CATEGORIES, "key", state, OPTS) is False
+    assert om.match_and_categorize("Temu", order, CATEGORIES, "key", state, OPTS, {}) is False
     assert puts == []
 
 
@@ -145,7 +145,7 @@ def test_a_transaction_weeks_away_is_not_the_same_purchase(monkeypatch):
     stub_llm(monkeypatch, GOOD_ANSWER)
     order = om.extract_order("Amazon", "body", "key", "PLN")
 
-    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", {}, OPTS) is False
+    assert om.match_and_categorize("Amazon", order, CATEGORIES, "key", {}, OPTS, {}) is False
     assert puts == []
 
 
@@ -241,7 +241,7 @@ def test_one_unreadable_email_does_not_cost_the_whole_run(monkeypatch, tmp_path)
 
     read = []
 
-    def matcher(shop, order, tree, key, state, opts):
+    def matcher(shop, order, tree, key, state, opts, rules):
         read.append(shop)
         return True
     monkeypatch.setattr(om, "match_and_categorize", matcher)
