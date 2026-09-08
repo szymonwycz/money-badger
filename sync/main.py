@@ -344,6 +344,30 @@ def shop_names(cfg: dict) -> tuple:
     return tuple((cfg.get("order_matching") or {}).get("shops") or {"Allegro": {}})
 
 
+def _rule_hits(needle: str, text: str) -> bool:
+    """Substring match, but anchored at a word start.
+
+    Rules are plain substrings, and they quietly matched inside longer words:
+    a merchant "bp" matched the Mbps in a network switch and filed it under
+    fuel, and a "leasing" rule matched a second-hand PC sold as
+    "Poleasingowy". Harmless while only short bank descriptors were rated —
+    a live problem once sync/order_match.py started running product names
+    from order emails through the same rules.
+
+    Only the front is anchored. Rules are often stems whose endings inflect,
+    so a closing \\b would break far more than it fixes. A needle starting
+    with punctuation gets no anchor: \\b before a non-word character means
+    the opposite of what is wanted here.
+    """
+    needle = needle.lower()
+    if not needle:
+        return False
+    pattern = re.escape(needle)
+    if needle[0].isalnum() or needle[0] == "_":
+        pattern = r"\b" + pattern
+    return re.search(pattern, text) is not None
+
+
 def apply_rules(title: str, counterpart: str, amount: float, rules: dict,
                 shops: tuple = ()) -> str | None:
     if amount > 0:
@@ -366,15 +390,15 @@ def apply_rules(title: str, counterpart: str, amount: float, rules: dict,
             return "CHECK ME"
 
     for p in rules.get("patterns", []):
-        if p["pattern"].lower() in text:
+        if _rule_hits(p["pattern"], text):
             return p["category"]
 
     for merchant, category in rules.get("merchant_map", {}).items():
-        if merchant.lower() in text:
+        if _rule_hits(merchant, text):
             return category
 
     for keyword, category in rules.get("keywords", {}).items():
-        if keyword.lower() in text:
+        if _rule_hits(keyword, text):
             return category
 
     return None

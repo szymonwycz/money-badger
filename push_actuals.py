@@ -102,7 +102,7 @@ def pull_corrections(corrections_dir: Path):
     """Pull unsynced corrections from the app, write them to CSV, return how many."""
     try:
         content, headers = budget_client.request(
-            "/api/corrections?synced=0", timeout=10, with_headers=True)
+            "/api/corrections?synced=0", timeout=10, with_headers=True, raw=True)
         # exactly which correction rows this CSV covers, so only these get
         # flagged synced later — a correction made while `learn` runs must not
         # be marked as handled when it never made it into any CSV

@@ -29,7 +29,8 @@ HTTPError = urllib.error.HTTPError
 URLError = urllib.error.URLError
 
 
-def request(path, method='GET', payload=None, timeout=20, with_headers=False):
+def request(path, method='GET', payload=None, timeout=20, with_headers=False,
+            raw=False):
     """Call the API. Returns the decoded body, or (body, headers) when asked.
 
     Errors are not swallowed: callers decide whether a failure is fatal, and
@@ -47,7 +48,11 @@ def request(path, method='GET', payload=None, timeout=20, with_headers=False):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read()
         resp_headers = dict(resp.headers)
-    parsed = json.loads(body) if body else None
+    # /api/corrections answers with CSV, not JSON. Decoding everything as JSON
+    # is how the corrections → learn loop dies silently: the pull raises,
+    # master_pi finds no CSV to feed learn, and the rules stop growing while
+    # the corrections pile up unsynced.
+    parsed = body.decode('utf-8') if raw else (json.loads(body) if body else None)
     return (parsed, resp_headers) if with_headers else parsed
 
 

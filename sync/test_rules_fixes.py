@@ -139,3 +139,36 @@ def test_shop_names_falls_back_to_the_same_default_as_order_match():
     assert main.shop_names({}) == ("Allegro",)
     assert main.shop_names({"order_matching": {"shops": {"Amazon": {}, "eBay": {}}}}) \
         == ("Amazon", "eBay")
+
+
+def test_rules_do_not_match_inside_a_longer_word():
+    """Plain substring matching lets a two-letter merchant hijack a product name:
+    "bp" matches the "Mbps" in a network switch, "leasing" matches the Polish
+    "Poleasingowy" (second-hand ex-lease). Invisible while only bank descriptors
+    were rated; a live problem once order_match started rating product names."""
+    rules = {
+        "keywords": {"leasing": "Car: Leasing"},
+        "merchant_map": {"bp": "Car: Fuel"},
+        "patterns": [],
+    }
+    assert main.apply_rules("Switch TP-LINK TL-SG108 (8x 10/100/1000Mbps)", "",
+                            -101.80, rules) is None
+    assert main.apply_rules("Poleasingowy micro Dell 7060 Tiny i5", "",
+                            -1998.0, rules) is None
+
+    # The rules these keywords were written for still fire.
+    assert main.apply_rules("CARD PAYMENT BP FUEL STATION", "",
+                            -250.0, rules) == "Car: Fuel"
+    assert main.apply_rules("LEASING INSTALMENT", "",
+                            -1200.0, rules) == "Car: Leasing"
+
+
+def test_stem_rules_still_match_inflected_endings():
+    """Only the front is anchored, on purpose: learned rules are stems and the
+    endings change. Anchoring the tail too would silently kill them."""
+    rules = {"keywords": {"uszczelka": "Home: Small accessories"},
+             "merchant_map": {}, "patterns": []}
+    assert main.apply_rules("USZCZELKA KLINOWA GRAFIT", "", -84.25,
+                            rules) == "Home: Small accessories"
+    assert main.apply_rules("zestaw uszczelkami do okien", "", -84.25,
+                            rules) == "Home: Small accessories"
