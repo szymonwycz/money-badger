@@ -98,21 +98,31 @@ if [ -n "$PASSWORD" ]; then
         || die "Username must be 2-32 characters: letters, digits, dot, dash or underscore."
 fi
 
-SYNC_TIME="10:30"; SYNC_RUNS=4
+SYNC_TIMES="10:30"; SYNC_RUNS=4; SYNC_PASSES=1
 if [ "$VARIANT" != "1" ]; then
     echo
-    echo "  When should the daily bank fetch run? Pick a time after your bank has"
-    echo "  posted the previous day — late morning is usually safe."
-    SYNC_TIME=$(ask "  Time (HH:MM)" "10:30")
-    [[ "$SYNC_TIME" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die "Use HH:MM, e.g. 10:30."
+    echo "  When should the bank fetch run? One time, or several separated by commas."
+    echo
+    echo "  Most banks post incoming transfers in settlement sessions, a few times per"
+    echo "  working day, rather than the moment they arrive. If you know your bank's"
+    echo "  sessions, put a pass a quarter of an hour after each one and the money shows"
+    echo "  up the same day — sessions at 11:00, 15:00 and 17:30 become 11:15,15:15,17:45."
+    echo "  Otherwise one late-morning time is fine: by then yesterday has posted."
+    SYNC_TIMES=$(ask "  Time(s) (HH:MM)" "10:30")
+    SYNC_TIMES=$(python3 "$APP_DIR/deploy/schedule.py" normalize "$SYNC_TIMES") \
+        || die "Use HH:MM, e.g. 10:30 — separate several with commas."
+    SYNC_PASSES=$(awk -F, '{print NF}' <<<"$SYNC_TIMES")
 
     echo
     echo "  If a fetch fails — bank down, no network — a watchdog retries later the"
     echo "  same day. Retries are skipped once the day has succeeded, but a run that"
-    echo "  keeps failing spends one bank API call each time, and most banks allow"
-    echo "  only a few per day."
-    SYNC_RUNS=$(ask "  Attempts per day in total (1-5)" "4")
+    echo "  keeps failing spends one bank API call each time, and most banks allow only"
+    echo "  about four per account per day — shared with the passes you just picked."
+    SYNC_RUNS=$(ask "  Attempts per day in total, passes included ($SYNC_PASSES-5)" \
+        "$((SYNC_PASSES < 5 ? SYNC_PASSES + 1 : 5))")
     [[ "$SYNC_RUNS" =~ ^[1-5]$ ]] || die "Pick a number from 1 to 5."
+    [ "$SYNC_RUNS" -ge "$SYNC_PASSES" ] \
+        || die "You asked for $SYNC_PASSES passes a day, so that is the minimum."
 fi
 
 LLM_PROVIDER=""; API_KEY=""; KEY_VAR=""; LLM_BASE_URL=""; LLM_MODEL=""
@@ -405,38 +415,26 @@ if command -v systemctl >/dev/null && [ -d /etc/systemd/system ]; then
     RENDER_DIR="$APP_DIR/deploy/rendered"
     mkdir -p "$RENDER_DIR"
 
-    # Space the retries between the daily run and the end of the day, so a
-    # morning failure still gets a few chances before midnight.
-    WATCHDOG_TIMES=""
-    if [ "$SYNC_RUNS" -gt 1 ]; then
-        WATCHDOG_TIMES=$(SYNC_TIME="$SYNC_TIME" SYNC_RUNS="$SYNC_RUNS" python3 - <<'PY'
-import os
-start_h, start_m = (int(x) for x in os.environ['SYNC_TIME'].split(':'))
-retries = int(os.environ['SYNC_RUNS']) - 1
-# Spread evenly between an hour after the main run and the last slot of the day,
-# both included — so there is always one more attempt before midnight.
-first, last = min(start_h + 1, 23), 23
-if retries == 1:
-    times = [last]
-else:
-    times = [round(first + i * (last - first) / (retries - 1)) for i in range(retries)]
-print('\n'.join(f'OnCalendar=*-*-* {h:02d}:{start_m:02d}:00' for h in sorted(set(times))))
-PY
-)
-    fi
+    # One OnCalendar line per pass, and the leftover attempts spread between the
+    # last pass and the end of the day (deploy/schedule.py).
+    SYNC_LINES=$(python3 "$APP_DIR/deploy/schedule.py" sync "$SYNC_TIMES")
+    WATCHDOG_TIMES=$(python3 "$APP_DIR/deploy/schedule.py" watchdog "$SYNC_TIMES" "$SYNC_RUNS")
 
     for tpl in "$APP_DIR"/deploy/*.template; do
         out="$RENDER_DIR/$(basename "${tpl%.template}")"
-        # Skip the watchdog entirely when the user asked for a single daily run.
-        if [ "$SYNC_RUNS" = "1" ] && [[ "$out" == *watchdog* ]]; then continue; fi
+        # Skip the watchdog entirely when the passes use up every attempt.
+        if [ -z "$WATCHDOG_TIMES" ] && [[ "$out" == *watchdog* ]]; then continue; fi
         sed -e "s|{{USER}}|$USER|g" -e "s|{{DIR}}|$APP_DIR|g" -e "s|{{PORT}}|$PORT|g" \
-            -e "s|{{HOSTNAME}}|$(hostname)|g" -e "s|{{SYNC_TIME}}|$SYNC_TIME|g" "$tpl" \
-            | awk -v times="$WATCHDOG_TIMES" '{ if ($0 == "{{WATCHDOG_TIMES}}") print times; else print }' \
+            -e "s|{{HOSTNAME}}|$(hostname)|g" "$tpl" \
+            | awk -v sync="$SYNC_LINES" -v times="$WATCHDOG_TIMES" \
+                  '{ if ($0 == "{{SYNC_TIMES}}") print sync;
+                     else if ($0 == "{{WATCHDOG_TIMES}}") print times;
+                     else print }' \
             > "$out"
     done
     echo "  unit files rendered into deploy/rendered/"
     if [ "$VARIANT" != "1" ]; then
-        echo "  sync at $SYNC_TIME, $SYNC_RUNS attempt(s) per day"
+        echo "  sync at ${SYNC_TIMES//,/, }, $SYNC_RUNS attempt(s) per day in total"
     fi
     echo
     echo "  Installing them needs root, so run these yourself:"

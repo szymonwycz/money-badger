@@ -149,8 +149,8 @@ sudo systemctl enable --now money-badger-sync.timer
 was revoked. Re-run `fetch-setup` for that account.
 
 **"ASPSP daily limit reached"** — the quota. It resets at midnight in the bank's
-timezone. If it happens every day, reduce the attempts per day (see
-[CONFIGURATION.md](CONFIGURATION.md#scheduling)).
+timezone. If it happens every day, drop a sync pass or reduce the attempts per day
+(see [CONFIGURATION.md](CONFIGURATION.md#scheduling)).
 
 **Transactions land on the wrong account** — `account_names` doesn't match your
 account names in the app. Fix the config; existing transactions need moving by

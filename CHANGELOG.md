@@ -4,6 +4,15 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
 
 ## Unreleased
 
+### Added
+- **`install.sh` takes several sync times**, comma-separated, and renders one
+  `OnCalendar` line per pass — for banks that post incoming transfers in settlement
+  sessions rather than on arrival. The prompt suggests a pass a quarter of an hour
+  after each session. Leftover attempts go to the watchdog, which now sits at the
+  end of the day so its retries don't spend bank calls between passes; ask for no
+  spare attempts and it isn't installed at all. The rendering logic moved out of
+  the installer into `deploy/schedule.py`, with `tests/test_schedule.py` over it.
+
 ### Changed
 - **Telegram is quiet on empty runs.** A sync pass that brings no new transactions
   and had no failures sends nothing instead of "(no new transactions)". This makes

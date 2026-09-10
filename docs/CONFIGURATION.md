@@ -262,9 +262,14 @@ trailing space no longer saves you.
 
 ## Scheduling
 
-`install.sh` asks how often to sync and renders the systemd timers. To change it
-later, edit the `OnCalendar` lines in `/etc/systemd/system/money-badger-sync*.timer`
-and run `sudo systemctl daemon-reload`.
+`install.sh` asks when to sync — one time, or several separated by commas — plus
+how many attempts a day in total, and renders the systemd timers from that. To
+change it later, edit the `OnCalendar` lines in
+`/etc/systemd/system/money-badger-sync*.timer` and run `sudo systemctl daemon-reload`.
+
+`Persistent=true` is set on both timers, so systemd replays a trigger it thinks
+was missed. Restarting a timer after a time that has already passed today
+therefore runs a pass immediately — expected, but it does spend a bank API call.
 
 Retries are free when the day's sync already succeeded — the run is skipped — but
 each genuine retry spends one bank API call, and most banks allow only a handful
@@ -272,22 +277,27 @@ per day.
 
 ### More than one fetch a day
 
-Banks post incoming transfers in settlement sessions, a few times per working day.
-If you want a pass shortly after each one, give the sync timer several `OnCalendar`
-lines — one per session, plus a little margin:
+Most banks don't post an incoming transfer the moment it arrives — they post it in
+settlement sessions, a few times per working day. A single morning sync therefore
+shows today's incoming money tomorrow. Find your bank's session times (they are
+usually published, and they differ per bank and per country), and put a pass about
+a quarter of an hour after each one:
 
-```ini
-[Timer]
-OnCalendar=*-*-* 11:15:00
-OnCalendar=*-*-* 15:15:00
-OnCalendar=*-*-* 17:45:00
-Persistent=true
-```
+| Bank posts at | Answer to give install.sh |
+|---|---|
+| 11:00, 15:00, 17:30 | `11:15,15:15,17:45` |
+| once, overnight | `10:30` |
 
-Then cut the watchdog back to a single late slot, or its retries will spend calls
-between your own passes. Count the total: with a typical quota of four calls per
-account per day, three passes plus one watchdog retry is the ceiling — beyond that
-the bank answers 429 and the account is skipped until midnight.
+The installer renders one `OnCalendar` line per time and spreads whatever attempts
+are left over onto the watchdog. Ask for enough attempts to cover the passes and
+one retry — with a typical quota of four calls per account per day, three passes
+plus one retry is the ceiling. Beyond it the bank answers 429 and skips that
+account until midnight.
+
+The watchdog is deliberately pushed to the end of the day when there are several
+passes: an earlier retry would fall between your own passes and spend a call right
+before one of them. If every attempt goes to a pass, the watchdog timer isn't
+installed at all.
 
 Telegram only speaks up when a pass brings new transactions or an account fails, so
 the extra passes stay quiet on a slow day. The daily self-checker report is what

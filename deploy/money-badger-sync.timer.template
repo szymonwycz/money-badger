@@ -1,8 +1,12 @@
 [Unit]
-Description=Run the Money Badger sync daily
+Description=Run the Money Badger sync
+# One OnCalendar line per pass. Changing them later takes a daemon-reload and a
+# restart of this timer — and note that Persistent=true makes systemd replay a
+# trigger it considers missed, so a restart after a time that has already passed
+# today runs a pass immediately.
 
 [Timer]
-OnCalendar=*-*-* {{SYNC_TIME}}:00
+{{SYNC_TIMES}}
 Persistent=true
 
 [Install]
