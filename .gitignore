@@ -29,4 +29,5 @@ known_issues.json
 # Runtime state
 .push_actuals_state.json
 .last_fetch_summary.json
+.master_pi.lock
 .self_checker_report.txt

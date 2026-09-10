@@ -18,6 +18,7 @@ add OnCalendar lines (see docs/CONFIGURATION.md#scheduling).
 """
 
 import argparse
+import fcntl
 import json
 import subprocess
 import sys
@@ -39,6 +40,7 @@ from logging_setup import start_logging, mark_success
 from notify_telegram import send_telegram
 
 SUMMARY_FILE = BASE_DIR / ".last_fetch_summary.json"
+LOCK_FILE    = BASE_DIR / ".master_pi.lock"
 
 
 def _get_checkme_count() -> str:
@@ -70,6 +72,28 @@ def _only_non_retryable_failures() -> bool:
         return False
     reasons = summary.get("failed_reasons", {})
     return bool(reasons) and all(r in NON_RETRYABLE_REASONS for r in reasons.values())
+
+
+def acquire_lock():
+    """The lock handle, or None when a run is already in progress.
+
+    Both money-badger-sync.timer and money-badger-sync-watchdog.timer carry
+    Persistent=true. When the machine is off at the scheduled time, systemd
+    replays both missed triggers in the same second — the watchdog then looks
+    for the success marker the running sync hasn't written yet (it is written
+    at the very end), decides the day failed and starts a second pipeline
+    alongside the first. That costs two bank fetches out of one daily quota,
+    two pushes, and two order-matching runs writing over each other's state.
+    The lock lives on the process, so it guards a manual run started during an
+    automatic one just as well.
+    """
+    fh = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        return None
+    return fh
 
 
 def _should_notify(summary: dict, today_str: str) -> bool:
@@ -296,4 +320,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # Before start_logging(), so a refused second run leaves no trace in the log
+    # and exits 0 — the watchdog must not be reported as failed for standing down.
+    _lock = acquire_lock()
+    if _lock is None:
+        print("master_pi.py is already running — exiting without a second pass.")
+        sys.exit(0)
     main()

@@ -4,6 +4,14 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
 
 ## Unreleased
 
+### Fixed
+- **Two pipelines could run at once.** Both sync timers carry `Persistent=true`, so
+  a machine that was off at the scheduled time replays the missed sync and the
+  missed watchdog in the same second — and the watchdog, seeing no success marker
+  yet, starts a second pipeline beside the running one: two bank fetches out of one
+  daily quota, two pushes, two order-matching runs overwriting each other. A
+  `flock` on `.master_pi.lock` makes the second run exit quietly with status 0.
+
 ### Added
 - **`install.sh` takes several sync times**, comma-separated, and renders one
   `OnCalendar` line per pass — for banks that post incoming transfers in settlement
