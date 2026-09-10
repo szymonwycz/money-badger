@@ -2,6 +2,15 @@
 
 Notable changes to Money Badger. Dates are Europe/Warsaw.
 
+## Unreleased
+
+### Changed
+- **Telegram is quiet on empty runs.** A sync pass that brings no new transactions
+  and had no failures sends nothing instead of "(no new transactions)". This makes
+  running the sync once per bank settlement session practical — see
+  [Scheduling](docs/CONFIGURATION.md#scheduling). Failures and partial runs still
+  notify, and the self-checker report still confirms the pipeline is alive.
+
 ## 1.0 — 2026-08-13 · first public release
 
 Version numbering restarts here: 2.0 was the private app, 1.0 is the first

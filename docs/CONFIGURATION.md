@@ -270,6 +270,29 @@ Retries are free when the day's sync already succeeded — the run is skipped �
 each genuine retry spends one bank API call, and most banks allow only a handful
 per day.
 
+### More than one fetch a day
+
+Banks post incoming transfers in settlement sessions, a few times per working day.
+If you want a pass shortly after each one, give the sync timer several `OnCalendar`
+lines — one per session, plus a little margin:
+
+```ini
+[Timer]
+OnCalendar=*-*-* 11:15:00
+OnCalendar=*-*-* 15:15:00
+OnCalendar=*-*-* 17:45:00
+Persistent=true
+```
+
+Then cut the watchdog back to a single late slot, or its retries will spend calls
+between your own passes. Count the total: with a typical quota of four calls per
+account per day, three passes plus one watchdog retry is the ceiling — beyond that
+the bank answers 429 and the account is skipped until midnight.
+
+Telegram only speaks up when a pass brings new transactions or an account fails, so
+the extra passes stay quiet on a slow day. The daily self-checker report is what
+tells you the sync is still alive.
+
 ---
 
 ## Order matching from email

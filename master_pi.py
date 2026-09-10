@@ -13,7 +13,8 @@ sync and watchdog hop, since most banks allow only a few per day.
 
     python3 master_pi.py [--dry-run]
 
-Run daily by money-badger-sync.timer.
+Run by money-badger-sync.timer — once a day as installed, or more often if you
+add OnCalendar lines (see docs/CONFIGURATION.md#scheduling).
 """
 
 import argparse
@@ -69,6 +70,25 @@ def _only_non_retryable_failures() -> bool:
         return False
     reasons = summary.get("failed_reasons", {})
     return bool(reasons) and all(r in NON_RETRYABLE_REASONS for r in reasons.values())
+
+
+def _should_notify(summary: dict, today_str: str) -> bool:
+    """Whether this run has anything worth a Telegram message.
+
+    The sync can be scheduled several times a day (one pass per incoming
+    settlement session at the bank), and most passes find nothing. Without this
+    gate every empty pass sends "(no new transactions)". Liveness is the
+    self-checker's job, not this message's.
+
+    The date is checked because run_fetch() returns early when Enable Banking
+    isn't configured, leaving .last_fetch_summary.json from a previous day —
+    without the check that stale list would be sent again.
+    """
+    if summary.get("failed_accounts"):
+        return True
+    if summary.get("date") != today_str:
+        return False
+    return any(acc.get("transactions") for acc in summary.get("accounts", []))
 
 
 def run_fetch(dry_run: bool = False) -> bool:
@@ -240,6 +260,9 @@ def main():
 
     if fetch_ok:
         mark_success("master_pi", BASE_DIR)
+        if not _should_notify(summary, today_str):
+            print("\nNothing new — skipping the Telegram notification.")
+            return
         checkme_count = _get_checkme_count()
         blocks = _account_blocks()
         body = "\n\n".join(blocks) if blocks else "(no new transactions)"
