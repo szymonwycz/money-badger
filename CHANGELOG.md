@@ -22,6 +22,13 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   the installer into `deploy/schedule.py`, with `tests/test_schedule.py` over it.
 
 ### Changed
+- **Card payments read merchant first.** Some Polish banks send them as `VISA PLAT
+  <card> PŁATNOŚĆ KARTĄ <amount> PLN  <merchant>`, burying the one part you check a
+  category against. TRANSACTIONS, CHECK ME and the mobile list now show
+  `<merchant> | <card details>` (refunds, card transfers, ATM withdrawals and
+  foreign-currency payments too). Display only: the database keeps the bank string,
+  and the editable description switches back to it while you edit. Descriptions from
+  other banks render unchanged.
 - **Telegram is quiet on empty runs.** A sync pass that brings no new transactions
   and had no failures sends nothing instead of "(no new transactions)". This makes
   running the sync once per bank settlement session practical — see
