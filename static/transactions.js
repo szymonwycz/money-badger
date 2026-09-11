@@ -171,7 +171,7 @@ function renderTable(txs) {
           <option value="">Choose account</option>
           ${toAcctOptions(tx)}
         </select>`
-      : `<input type="text" value="${esc(tx.description)}" style="width:100%;background:transparent;border:none;color:inherit;font-size:inherit;padding:0" data-field="description">`;
+      : `<input type="text" value="${esc(fmtDesc(tx.description))}" style="width:100%;background:transparent;border:none;color:inherit;font-size:inherit;padding:0" data-field="description">`;
 
     // CATEGORY / SUBCATEGORY — Transfer has neither, Income uses the flat income-category list
     let catCell, subCell;
@@ -236,6 +236,14 @@ function renderTable(txs) {
       input.addEventListener('keydown', e  => { if (e.key === 'Enter') input.blur(); });
       input.addEventListener('click',   e  => e.stopPropagation());
     });
+
+    // Merchant-first while reading, raw bank string while editing — so a blur never saves the
+    // reordered text. Registered after the save-on-blur above, which reads the raw value first.
+    const descInput = tr.querySelector('input[data-field="description"]');
+    if (descInput) {
+      descInput.addEventListener('focus', () => { descInput.value = tx.description || ''; });
+      descInput.addEventListener('blur',  () => { tx.description = descInput.value; descInput.value = fmtDesc(descInput.value); });
+    }
 
     const typeSel = tr.querySelector('.type-sel');
     if (typeSel) {

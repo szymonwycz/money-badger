@@ -219,3 +219,16 @@ function clickable(el, handler, label) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(e); }
   });
 }
+
+// Card-payment descriptions come from EB as "VISA PLAT <card> PŁATNOŚĆ KARTĄ <amount> PLN  <merchant>" —
+// merchant (the only useful part on a quick scan) is buried at the end. Same shape for ZWROT PŁATNOŚCI /
+// PRZELEW / WYPŁATA Z BANKOMATU KARTĄ and for foreign currency ("8.10 GBP 1 GBP=5.0590 PLN").
+// Cosmetic reorder for display only; the raw string stays untouched in the DB and is what an edit
+// field shows while editing.
+const CARD_TX_RE = /^((?:DOP\.\s*)?(?:VISA|MASTERCARD)\s*(?:PLAT)?\s*[\d*]{4,}\s+[A-ZĄĆĘŁŃÓŚŹŻ ]*?KART[ĄA]\s*[\d.,]+\s*[A-Z]{3}(?:\s+1\s+[A-Z]{3}=[\d.,]+\s*PLN)?)\s+(.+)$/;
+
+function fmtDesc(desc) {
+  if (!desc) return desc;
+  const m = desc.match(CARD_TX_RE);
+  return m ? `${m[2].trim()} | ${m[1].trim()}` : desc;
+}

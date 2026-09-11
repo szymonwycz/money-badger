@@ -446,7 +446,7 @@ function renderTxList() {
       </div>
       <div class="meta">
         <span class="acct">${esc(tx.account || '—')}</span>
-        ${tx.description ? `<span class="desc">${esc(tx.description)}</span>` : ''}
+        ${tx.description ? `<span class="desc">${esc(fmtDesc(tx.description))}</span>` : ''}
       </div>
     `;
     row.addEventListener('click', () => openTxDetail(tx));
@@ -503,7 +503,7 @@ function checkItem(tx, isIncome) {
       <span>${fmtDayMonth(tx.date)} · ${esc(tx.account || '—')}</span>
       <span class="amount" style="color:${txColor(tx)}">${fmtNum(Math.abs(tx.amount))}</span>
     </div>
-    <div class="m-check-desc">${esc(tx.description || '—')}</div>
+    <div class="m-check-desc">${esc(fmtDesc(tx.description) || '—')}</div>
     <select aria-label="Category for this transaction">${opts}</select>
     <div class="m-check-actions"><button type="button" class="m-check-ignore">IGNORE</button></div>
   `;

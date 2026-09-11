@@ -34,7 +34,7 @@ function renderExpenses() {
       <td class="tx-date">${formatDate(tx.date)}</td>
       <td class="tx-amount">${fmtNum(Math.abs(tx.amount))}</td>
       <td class="tx-acct">${esc(tx.account)}</td>
-      <td class="tx-desc">${esc(tx.description)}</td>
+      <td class="tx-desc">${esc(fmtDesc(tx.description))}</td>
       <td><select class="parent-sel">${catOpts}</select></td>
       <td><select class="child-sel"><option value="">—</option></select></td>
       <td><button class="btn-ignore" type="button">IGNORE</button></td>
@@ -84,7 +84,7 @@ function renderIncome() {
       <td class="tx-date">${formatDate(tx.date)}</td>
       <td class="tx-amount">${fmtNum(tx.amount)}</td>
       <td class="tx-acct">${esc(tx.account)}</td>
-      <td class="tx-desc">${esc(tx.description)}</td>
+      <td class="tx-desc">${esc(fmtDesc(tx.description))}</td>
       <td><select class="income-cat-sel">${catOpts}</select></td>
       <td><button class="btn-ignore" type="button">IGNORE</button></td>
     `;
