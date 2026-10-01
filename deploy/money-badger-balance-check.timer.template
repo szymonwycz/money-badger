@@ -2,9 +2,12 @@
 Description=Check bank balances weekly
 # Weekly, not daily: every call counts against the bank's daily API quota,
 # and this is only a drift check - balances are computed from transactions.
+# 05:30, not 02:30: the bank's nightly service window answered 400 for every
+# account on 2026-07-18 and 2026-09-26. Still the first call of the day, so it
+# keeps the free quota slot ahead of the daytime transaction syncs.
 
 [Timer]
-OnCalendar=Sat *-*-* 02:30:00
+OnCalendar=Sat *-*-* 05:30:00
 Persistent=true
 
 [Install]
