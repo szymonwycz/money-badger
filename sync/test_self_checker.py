@@ -60,8 +60,8 @@ def test_stale_fetch_flags_old_last_fetch():
 
 
 def test_yesterdays_checkpoint_is_the_healthy_state_not_a_finding():
-    """A successful sync checkpoints *yesterday* — it only fetches fully booked
-    days — so one day of lag is normal, not stale."""
+    """An intraday sync fetches today but checkpoints yesterday so later passes
+    can still see new same-day rows; one day of lag is healthy."""
     root = _tmp_root()
     cfg = {"own_ibans": ["1111"], "account_names": {"1111": "Checking"},
            "enable_banking": {"default_aspsp": {"country": "PL"}}}
@@ -216,6 +216,28 @@ def test_orphan_raw_pulls_flags_missing_commit():
     assert findings == [], findings
 
 
+def test_orphan_raw_pull_window_can_run_from_yesterday_through_today():
+    import os
+    import time
+    root = _tmp_root()
+    con = _make_db(root)
+    con.close()
+    cfg = {"account_names": {"1111": "Checking"}}
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
+    raw = {"transactions": [
+        {"transaction_amount": {"amount": "10.00"}},
+        {"transaction_amount": {"amount": "20.00"}},
+    ]}
+    f = root / "raw_pulls" / f"1111_{yesterday}_{today}_20321009T111500.json"
+    f.write_text(json.dumps(raw))
+    old_time = time.time() - 86400
+    os.utime(f, (old_time, old_time))
+
+    findings = self_checker.check_orphan_raw_pulls(cfg)
+    assert any(f"fetched {yesterday}..{today}" in x for x in findings), findings
+
+
 def test_checkme_backlog_respects_ignored_and_type_filters():
     root = _tmp_root()
     con = _make_db(root)
@@ -279,6 +301,7 @@ if __name__ == "__main__":
     test_balance_discrepancy_flags_when_timer_stopped_running()
     test_duplicate_income_balance_adjust_sql()
     test_orphan_raw_pulls_flags_missing_commit()
+    test_orphan_raw_pull_window_can_run_from_yesterday_through_today()
     test_checkme_backlog_respects_ignored_and_type_filters()
     test_allegro_backlog_only_checks_last_run_of_the_day()
     print("OK — all self_checker tests passed")

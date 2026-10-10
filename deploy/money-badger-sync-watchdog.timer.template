@@ -1,9 +1,8 @@
 [Unit]
-Description=Money Badger sync watchdog - retries if the daily run failed
-# Each retry is a no-op when the day's sync already succeeded, so extra passes
-# cost nothing. They are not free against the bank though: a failed run that
-# keeps failing will spend one API call per attempt, and most banks allow only
-# a handful per day.
+Description=Money Badger sync watchdog - retries if no pass succeeded today
+# This is a no-op after any successful pass. A real retry spends one transaction
+# request per account. The separate weekly balance check spends another request
+# on its day and is not represented by the lines rendered below.
 
 [Timer]
 {{WATCHDOG_TIMES}}

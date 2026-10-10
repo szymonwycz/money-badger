@@ -114,12 +114,12 @@ if [ "$VARIANT" != "1" ]; then
     SYNC_PASSES=$(awk -F, '{print NF}' <<<"$SYNC_TIMES")
 
     echo
-    echo "  If a fetch fails — bank down, no network — a watchdog retries later the"
-    echo "  same day. Retries are skipped once the day has succeeded, but a run that"
-    echo "  keeps failing spends one bank API call each time, and most banks allow only"
-    echo "  about four per account per day — shared with the passes you just picked."
-    SYNC_RUNS=$(ask "  Attempts per day in total, passes included ($SYNC_PASSES-5)" \
-        "$((SYNC_PASSES < 5 ? SYNC_PASSES + 1 : 5))")
+    echo "  If no pass succeeds — bank down, no network — a watchdog retries later."
+    echo "  Each real attempt costs one bank call per account; the weekly balance check"
+    echo "  adds another on its day, so a typical four-call quota may then be reached."
+    DEFAULT_SYNC_RUNS=$((SYNC_PASSES < 5 ? SYNC_PASSES + 1 : 5))
+    SYNC_RUNS=$(ask "  Transaction-fetch attempts per day, passes included ($SYNC_PASSES-5)" \
+        "$DEFAULT_SYNC_RUNS")
     [[ "$SYNC_RUNS" =~ ^[1-5]$ ]] || die "Pick a number from 1 to 5."
     [ "$SYNC_RUNS" -ge "$SYNC_PASSES" ] \
         || die "You asked for $SYNC_PASSES passes a day, so that is the minimum."
@@ -162,7 +162,12 @@ if [ "$VARIANT" = "3" ]; then
                 echo
                 echo "  That is everything the provider sells, embeddings and all."
                 echo "  Cheap and fast is usually right — this runs on every unmatched"
-                echo "  transaction. Enter empty to decide later in .env."
+                echo "  transaction. A model you pick here is used for both tasks."
+                if [ "$LLM_PROVIDER" = "anthropic" ]; then
+                    echo "  Enter empty for Haiku 5.5 categorization and Sonnet 5.5 learning."
+                else
+                    echo "  Enter empty to decide later in .env."
+                fi
                 PICK=$(ask "  Which model (number, or paste an id)" "")
                 if [[ "$PICK" =~ ^[0-9]+$ ]]; then
                     LLM_MODEL=$(echo "$MODELS" | sed -n "${PICK}p")
@@ -415,8 +420,8 @@ if command -v systemctl >/dev/null && [ -d /etc/systemd/system ]; then
     RENDER_DIR="$APP_DIR/deploy/rendered"
     mkdir -p "$RENDER_DIR"
 
-    # One OnCalendar line per pass, and the leftover attempts spread between the
-    # last pass and the end of the day (deploy/schedule.py).
+    # One OnCalendar line per pass. Spare transaction-fetch attempts (the weekly
+    # balance check is separate) are spread after the last pass.
     SYNC_LINES=$(python3 "$APP_DIR/deploy/schedule.py" sync "$SYNC_TIMES")
     WATCHDOG_TIMES=$(python3 "$APP_DIR/deploy/schedule.py" watchdog "$SYNC_TIMES" "$SYNC_RUNS")
 
@@ -434,7 +439,7 @@ if command -v systemctl >/dev/null && [ -d /etc/systemd/system ]; then
     done
     echo "  unit files rendered into deploy/rendered/"
     if [ "$VARIANT" != "1" ]; then
-        echo "  sync at ${SYNC_TIMES//,/, }, $SYNC_RUNS attempt(s) per day in total"
+        echo "  sync at ${SYNC_TIMES//,/, }, $SYNC_RUNS transaction-fetch attempt(s) per day"
     fi
     echo
     echo "  Installing them needs root, so run these yourself:"

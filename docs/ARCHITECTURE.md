@@ -17,7 +17,7 @@ years, by the person who installed it and nobody else.
                     │                          ▼               │
                     │           SQLite budget.db (WAL)         │
                     │                          ▲               │
-                    │  sync timer (daily, optional)            │
+                    │  sync timer (one or more daily passes)   │
                     │  ├─ bank fetch (Enable Banking)          │
                     │  ├─ filter, keyword rules, then an LLM   │
                     │  └─ HTTP POST back into the same API ────┘
@@ -108,7 +108,7 @@ balance + Σ effect(tx)  for tx.id > balance_anchor_tx_id
 where `effect` is +amount for income, −amount for expenses, and ± for
 transfers touching the account. Manually editing a balance writes a
 `Balance Adjust` audit row and moves the anchor to it, so history before the
-edit no longer affects the display. The daily Enable Banking balance fetch
+edit no longer affects the display. The weekly Enable Banking balance fetch
 does **not** overwrite balances — it only warns on drift (a drift signals a
 missing or duplicated transaction, which should be fixed, not papered over).
 
@@ -128,9 +128,17 @@ Money Badger does not talk to banks itself. A separate pipeline (same repo,
 3. matches Allegro purchases via Gmail IMAP,
 4. pushes to `/api/transactions/bulk` (hash-deduplicated),
 5. pulls category corrections back for rule learning,
-6. compares bank balances against computed balances (warn-only).
+6. compares bank balances against computed balances on a separate weekly timer
+   (warn-only).
 
 Anything unmatched lands in **CHECK ME** for manual review.
+
+Each transaction pass fetches through the still-open current day with a two-day
+overlap for pending or late bookings. The durable checkpoint advances only
+through yesterday, and stable Enable Banking ids remove overlap/replay
+duplicates. Rows are merged by that id into one cumulative account/day CSV and
+the file is atomically replaced before the checkpoint is committed, so a later
+pass cannot overwrite transactions still waiting to be pushed.
 
 ## Design decisions
 

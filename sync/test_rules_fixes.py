@@ -94,6 +94,33 @@ def test_invented_categories_never_reach_rules_json():
     assert merged["patterns"] == []
 
 
+def test_holder_only_rules_are_rejected_but_longer_phrases_survive(capsys):
+    holders = ["  Alex   Example  "]
+    merged = main.merge_rules(
+        {"keywords": {}, "merchant_map": {}, "patterns": []},
+        {
+            "keywords": {
+                "ALEX EXAMPLE": "Groceries",
+                "therapy alex example": "Groceries",
+            },
+            "merchant_map": {
+                " alex example ": "Transport",
+                "services alex example": "Transport",
+            },
+            "patterns": [
+                {"pattern": "Alex\tExample", "category": "Children", "priority": 1},
+                {"pattern": "accounting alex example", "category": "Children", "priority": 1},
+            ],
+        },
+        account_holders=holders,
+    )
+
+    assert merged["keywords"] == {"therapy alex example": "Groceries"}
+    assert merged["merchant_map"] == {"services alex example": "Transport"}
+    assert [p["pattern"] for p in merged["patterns"]] == ["accounting alex example"]
+    assert capsys.readouterr().out.count("only an account holder's name") == 3
+
+
 def test_keyword_does_not_match_across_a_word_boundary():
     """The 'bp ' keyword used to also match the trailing space of 'exchanged to gbp'."""
     assert main.apply_rules("Exchanged to GBP", "", -750.0, RULES) is None

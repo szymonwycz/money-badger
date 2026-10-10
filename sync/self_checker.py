@@ -69,9 +69,9 @@ def check_stale_fetch(cfg: dict) -> list[str]:
     account_names = cfg.get("account_names", {})
     today = date.today()
 
-    # The checkpoint a successful sync writes is *yesterday* — it fetches up to
-    # the last fully booked day. So one day of lag is the healthy steady state,
-    # and two is normal for the hours between midnight and the daily run.
+    # Every intraday pull includes today but checkpoints *yesterday*, leaving
+    # the current day open for later passes. One day of checkpoint lag is the
+    # healthy steady state; two is normal before the first daily pass.
     threshold = STALE_FETCH_DAYS if sync_ran_today() else STALE_FETCH_DAYS + 1
 
     findings = []

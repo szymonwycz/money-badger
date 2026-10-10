@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-master_pi.py – the daily fetch/push orchestrator.
+master_pi.py – one scheduled fetch/push pass.
 
 Steps: 0 fetch from the bank -> 0b learn rules from corrections -> 3 push to the
 app -> 4 match orders from email.
@@ -13,8 +13,8 @@ sync and watchdog hop, since most banks allow only a few per day.
 
     python3 master_pi.py [--dry-run]
 
-Run by money-badger-sync.timer — once a day as installed, or more often if you
-add OnCalendar lines (see docs/CONFIGURATION.md#scheduling).
+Run by money-badger-sync.timer at every configured settlement-session time (see
+docs/CONFIGURATION.md#scheduling).
 """
 
 import argparse
@@ -78,11 +78,11 @@ def acquire_lock():
     """The lock handle, or None when a run is already in progress.
 
     Both money-badger-sync.timer and money-badger-sync-watchdog.timer carry
-    Persistent=true. When the machine is off at the scheduled time, systemd
-    replays both missed triggers in the same second — the watchdog then looks
+    Persistent=true. When the machine is off during a configured pass, systemd
+    can replay that missed trigger together with the late watchdog — which looks
     for the success marker the running sync hasn't written yet (it is written
     at the very end), decides the day failed and starts a second pipeline
-    alongside the first. That costs two bank fetches out of one daily quota,
+    alongside the first. That costs two bank fetches out of the daily quota,
     two pushes, and two order-matching runs writing over each other's state.
     The lock lives on the process, so it guards a manual run started during an
     automatic one just as well.
@@ -112,7 +112,17 @@ def _should_notify(summary: dict, today_str: str) -> bool:
         return True
     if summary.get("date") != today_str:
         return False
+    if summary.get("window_warnings"):
+        return True
     return any(acc.get("transactions") for acc in summary.get("accounts", []))
+
+
+def _window_warning_block(summary: dict) -> str:
+    warnings = summary.get("window_warnings") or {}
+    if not warnings:
+        return ""
+    lines = "\n".join(f"{name} - {reason}" for name, reason in warnings.items())
+    return f"⚠️ Permanent bank-data gap\n{lines}"
 
 
 def run_fetch(dry_run: bool = False) -> bool:
@@ -264,6 +274,7 @@ def main():
     summary_accounts = summary.get("accounts", [])
     summary_failed = summary.get("failed_accounts", [])
     summary_reasons = summary.get("failed_reasons", {})
+    window_warning_block = _window_warning_block(summary)
     today_str = datetime.date.today().isoformat()
 
     def _n(n, word):
@@ -290,6 +301,8 @@ def main():
         checkme_count = _get_checkme_count()
         blocks = _account_blocks()
         body = "\n\n".join(blocks) if blocks else "(no new transactions)"
+        if window_warning_block:
+            body = f"{window_warning_block}\n\n{body}"
 
         if summary_failed:
             ok_names = ", ".join(a["name"] for a in summary_accounts) or "(none)"
@@ -315,7 +328,8 @@ def main():
             )
         else:
             failed_lines = "(no accounts identified — check the log)"
-        send_telegram(f"❌ Money Badger — sync FAILED ({today_str})\n\n{failed_lines}\n\n"
+        warning = f"\n\n{window_warning_block}" if window_warning_block else ""
+        send_telegram(f"❌ Money Badger — sync FAILED ({today_str})\n\n{failed_lines}{warning}\n\n"
                       f"Check logs/sync_{today_str}.log for details.")
 
 

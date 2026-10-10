@@ -3,7 +3,7 @@
 
     schedule.py normalize "11:15, 15:15,17:45"   -> 11:15,15:15,17:45
     schedule.py sync      "11:15,15:15,17:45"    -> three OnCalendar lines
-    schedule.py watchdog  "11:15,15:15,17:45" 4  -> the retry lines (here: one)
+    schedule.py watchdog  "11:15,15:15,17:45" 4  -> one transaction retry line
 
 Lives outside install.sh so it can be tested — see tests/test_schedule.py.
 Bad input exits 1 with the reason on stderr; install.sh turns that into a die().
@@ -31,9 +31,11 @@ def parse_times(raw: str):
 
 
 def watchdog_hours(times, total_attempts: int):
-    """Hours for the retry timer: spread between an hour after the last pass and
-    the last slot of the day, both included, so there is always one more attempt
-    before midnight. Empty when the passes already use up the attempts."""
+    """Hours for spare transaction-fetch attempts after the scheduled passes.
+
+    The weekly balance check is a separate bank call and is deliberately not
+    counted here; docs and install.sh warn that it also consumes daily quota.
+    """
     retries = total_attempts - len(times)
     if retries <= 0:
         return []

@@ -14,6 +14,7 @@ Commands:
 
 import argparse
 import csv
+import io
 import json
 import os
 import re
@@ -450,7 +451,16 @@ Answer with JSON ONLY, in this format:
   ...
 ]"""
 
-    raw = llm.complete(prompt, task="categorize", max_tokens=4000, api_key=api_key)
+    try:
+        raw = llm.complete(prompt, task="categorize", max_tokens=16000, api_key=api_key)
+    except llm.LLMRefusalError as exc:
+        # A refusal is a valid provider result, not a transient account failure.
+        # Raising here would retry the pipeline and spend another bank request.
+        print(f"  LLM refused the categorization batch ({exc}); sending it to CHECK ME.")
+        return [
+            {**tx, "category": "CHECK ME", "note": "LLM refusal - manual review"}
+            for tx in transactions
+        ]
     cat_map = {item["idx"]: item for item in llm.extract_json(raw)}
 
     return [
@@ -520,8 +530,23 @@ def categorize_transactions(transactions: list, cfg: dict, api_key: str) -> list
 # The column layout and the "moneypro_" filename prefix are what push_actuals.py
 # reads; keep them in step if you ever change either.
 
+def _money_pro_csv_line(fields: list) -> str:
+    """Serialize one physical Money Pro row without changing plain rows."""
+    # The cumulative merge works one physical line at a time, so flatten all
+    # Unicode line separators before csv.writer quotes delimiters and quotes.
+    single_line = [" ".join(str(value).splitlines()) for value in fields]
+    output = io.StringIO(newline="")
+    csv.writer(output, delimiter=";", lineterminator="\n",
+               quoting=csv.QUOTE_MINIMAL).writerow(single_line)
+    return output.getvalue()[:-1]
+
+
 def generate_money_pro_csv(transactions: list, account_name: str, account_names: dict) -> str:
-    lines = ["Date;Amount;Account;Amount received;Account (to);Balance;Category;Description;Transaction Type;Agent;Check #;Class;"]
+    lines = [_money_pro_csv_line([
+        "Date", "Amount", "Account", "Amount received", "Account (to)",
+        "Balance", "Category", "Description", "Transaction Type", "Agent",
+        "Check #", "Class", "",
+    ])]
 
     for tx in transactions:
         amount  = tx["amount"]
@@ -562,13 +587,72 @@ def generate_money_pro_csv(transactions: list, account_name: str, account_names:
         # "counterpart" instead; fall back to it so the description isn't empty.
         desc      = (tx["title"] or tx["counterpart"])[:255]
         full_desc = f"{desc} [{note}]" if note else desc
+        check_number = tx.get("_eb_id", "")
 
-        lines.append(
-            f"{dt_fmt};{amt_str};{account_name};{amount_recv};{account_to};;"
-            f"{category};{full_desc};{tx_type};;;;"
-        )
+        lines.append(_money_pro_csv_line([
+            dt_fmt, amt_str, account_name, amount_recv, account_to, "",
+            category, full_desc, tx_type, "", check_number, "", "",
+        ]))
 
     return "\n".join(lines)
+
+
+def _csv_check_number(line: str) -> str:
+    """Return Money Pro's Check # field, reading from the stable row tail."""
+    fields = next(csv.reader([line], delimiter=";"), [])
+    return fields[-3].strip() if len(fields) >= 3 else ""
+
+
+def _merge_daily_csv(path: Path, new_csv_text: str) -> int:
+    """Atomically append rows whose EB Check # is absent from this daily CSV."""
+    new_lines = new_csv_text.splitlines()
+    if not new_lines:
+        raise ValueError("generated CSV is empty")
+    if _csv_check_number(new_lines[0]) != "Check #":
+        raise ValueError("generated CSV has no Check # column")
+
+    if path.exists():
+        # Preserve legacy rows byte-for-byte, including their line endings.
+        existing_text = path.read_bytes().decode("utf-8")
+        existing_lines = existing_text.splitlines()
+        if not existing_lines:
+            raise ValueError(f"existing CSV is empty: {path}")
+        if existing_lines[0] != new_lines[0]:
+            raise ValueError(f"CSV header mismatch: {path}")
+    else:
+        existing_text = new_lines[0]
+        existing_lines = [new_lines[0]]
+
+    seen = {
+        check for line in existing_lines[1:]
+        if (check := _csv_check_number(line))
+    }
+    appended = []
+    for line in new_lines[1:]:
+        check = _csv_check_number(line)
+        if not check:
+            raise ValueError("new EB CSV row has an empty Check #")
+        if check in seen:
+            continue
+        seen.add(check)
+        appended.append(line)
+
+    if not appended and path.exists():
+        return 0
+
+    merged = existing_text
+    if appended:
+        if merged and not merged.endswith(("\n", "\r")):
+            merged += "\n"
+        merged += "\n".join(appended)
+
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(merged)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+    return len(appended)
 
 # ─── Splitting bundled payments ───────────────────────────────────────────────
 #
@@ -606,13 +690,15 @@ def split_transactions(transactions: list, rules: list = None) -> list:
 
         base = {k: v for k, v in tx.items()
                 if k not in ("amount", "category", "_transfer", "_to_account")}
-        for part in rule["parts"]:
+        for part_index, part in enumerate(rule["parts"]):
             row = dict(base)
             row["amount"] = remainder if part["amount"] == "remainder" else -part["amount"]
             row["category"] = part["category"]
             row["_transfer"] = False
             row["_to_account"] = ""
             row["title"] = f"{tx['title']} — {part.get('label', part['category'])}"
+            if tx.get("_eb_id"):
+                row["_eb_id"] = f"{tx['_eb_id']}#{part_index}"
             result.append(row)
 
     return result
@@ -669,6 +755,18 @@ def cmd_fetch_setup(args):
     fetcher.setup(ibans, aspsp_by_iban, default_aspsp)
 
 
+def _make_fetch_summary(accounts, failed_accounts, failed_reasons,
+                        window_warnings) -> dict:
+    """Single summary shape shared by the writer and offline tests."""
+    return {
+        "date": date.today().isoformat(),
+        "accounts": accounts,
+        "failed_accounts": failed_accounts,
+        "failed_reasons": failed_reasons,
+        "window_warnings": window_warnings,
+    }
+
+
 def cmd_fetch(args):
     env = load_env()
     cfg = load_config()
@@ -720,7 +818,8 @@ def cmd_fetch(args):
                              fallback_dates=fallback_dates, dry_run=args.dry_run)
 
     # Accounts fetch() itself gave up on (rate limit, expired session, missing
-    # config) — as opposed to "already up to date", which isn't in this list.
+    # config). Window-cap warnings stay separate: retrying cannot recover dates
+    # outside days_back, so they notify without failing the run.
     # These never got a fetch attempt at all, so they must NOT count toward a
     # successful run, or the watchdog stands down while their data goes stale.
     skipped_ibans = list(getattr(fetcher, "last_skipped", []))
@@ -732,16 +831,19 @@ def cmd_fetch(args):
         account_names.get(iban, iban[-4:]): skip_reasons.get(iban, "unknown reason")
         for iban in skipped_ibans
     }
+    window_warnings = {
+        account_names.get(iban, iban[-4:]): reason
+        for iban, reason in getattr(fetcher, "window_warnings", {}).items()
+    }
     accounts_out = []  # for .last_fetch_summary.json (master_pi.py -> Telegram)
 
     def _write_summary():
         if args.dry_run:
             return
-        (BASE_DIR.parent / ".last_fetch_summary.json").write_text(json.dumps(
-            {"date": date.today().isoformat(), "accounts": accounts_out,
-             "failed_accounts": failed_accounts, "failed_reasons": failed_reasons},
-            ensure_ascii=False,
-        ))
+        summary = _make_fetch_summary(
+            accounts_out, failed_accounts, failed_reasons, window_warnings)
+        (BASE_DIR.parent / ".last_fetch_summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False))
 
     if not fetched:
         _write_summary()
@@ -800,11 +902,11 @@ def cmd_fetch(args):
                     output_dir.mkdir(parents=True, exist_ok=True)
                     today    = date.today().isoformat()
                     out_path = output_dir / f"moneypro_{account_name}_{today}.csv"
-                    out_path.write_text(
+                    added = _merge_daily_csv(
+                        out_path,
                         generate_money_pro_csv(categorized, account_name, account_names),
-                        encoding="utf-8",
                     )
-                    print(f"  Written: {out_path}")
+                    print(f"  Written: {out_path} (+{added} new row(s))")
 
             # Only now — filtered, categorized, written to disk — is it safe to
             # advance the checkpoint for this account. dry-run never commits,
@@ -994,33 +1096,51 @@ Rules:
 Return ONLY the JSON."""
 
     raw = llm.complete(prompt, task="learn", system=LEARN_SYSTEM_PROMPT,
-                       max_tokens=3000, api_key=api_key)
+                       max_tokens=16000, api_key=api_key)
     return llm.extract_json(raw)
 
 
-def drop_invalid_rules(rules: dict) -> dict:
+def _normalize_rule_key(value) -> str:
+    """Normalize only case and whitespace; specific longer phrases stay distinct."""
+    return " ".join(value.lower().split()) if isinstance(value, str) else ""
+
+
+def drop_invalid_rules(rules: dict, account_holders: list = None) -> dict:
     """Rules are written by an LLM from the corrections CSV, and it invents category
     names ("Child: Nursery: Fees", "Home: Tools&Materials"). apply_rules returns
     the invented name, validate_category rejects it, and the transaction lands in
     CHECK ME — every single month, however often it gets corrected. Drop them at the
-    door so a bad rule can never be written to rules.json."""
+    door so a bad rule can never be written to rules.json.
+
+    A holder's bare full name is also too broad: it appears in unrelated
+    transfers and invoices. A longer phrase containing it remains allowed.
+    """
+    holder_names = {
+        normalized for value in (account_holders or [])
+        if (normalized := _normalize_rule_key(value))
+    }
     kept = {"keywords": {}, "merchant_map": {}, "patterns": []}
     for section in ("keywords", "merchant_map"):
         for key, cat in rules.get(section, {}).items():
-            if cat in valid_categories():
+            if _normalize_rule_key(key) in holder_names:
+                print(f"  Dropping rule '{key}' — it is only an account holder's name")
+            elif cat in valid_categories():
                 kept[section][key] = cat
             else:
                 print(f"  Dropping rule '{key}' — no such category '{cat}'")
     for p in rules.get("patterns", []):
-        if p.get("category") in valid_categories():
+        pattern = p.get("pattern")
+        if _normalize_rule_key(pattern) in holder_names:
+            print(f"  Dropping pattern '{pattern}' — it is only an account holder's name")
+        elif p.get("category") in valid_categories():
             kept["patterns"].append(p)
         else:
-            print(f"  Dropping pattern '{p.get('pattern')}' — no such category '{p.get('category')}'")
+            print(f"  Dropping pattern '{pattern}' — no such category '{p.get('category')}'")
     return kept
 
 
-def merge_rules(existing: dict, new_rules: dict) -> dict:
-    new_rules = drop_invalid_rules(new_rules)
+def merge_rules(existing: dict, new_rules: dict, account_holders: list = None) -> dict:
+    new_rules = drop_invalid_rules(new_rules, account_holders)
     merged = {
         "keywords":     {**existing.get("keywords", {}),     **new_rules.get("keywords", {})},
         "merchant_map": {**existing.get("merchant_map", {}), **new_rules.get("merchant_map", {})},
@@ -1079,7 +1199,7 @@ def cmd_learn(args):
           f"{len(new_rules.get('merchant_map', {}))} merchant mappings")
 
     existing = load_rules()
-    merged   = merge_rules(existing, new_rules)
+    merged   = merge_rules(existing, new_rules, cfg.get("account_holders"))
 
     print(f"\nAfter merging: {len(merged['keywords'])} keywords, "
           f"{len(merged['patterns'])} patterns, "

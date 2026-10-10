@@ -3,10 +3,12 @@
 watchdog.py – did today's master_pi.py finish? The run leaves a marker at
 logs/.success_master_pi_{date}; without one, run it again.
 
-Run by money-badger-sync-watchdog.timer at 14:30/17:30/23:30 —
-catches a scheduled run that never finished — the app briefly down, the
-network gone. Safe to run repeatedly on the same day: fetch and push are
-idempotent, deduplicating on hash/eb_id.
+Run late by money-badger-sync-watchdog.timer when the configured transaction
+attempt budget leaves a spare slot. It catches a day in which no scheduled pass
+finished — the app briefly down, the network gone. It does not retry a failed
+late pass after an earlier pass succeeded. That pass's rows remain reachable
+through the next day's overlapping fetch window. Fetch and push are idempotent,
+deduplicating on hash/eb_id.
 """
 import subprocess
 import sys

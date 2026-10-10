@@ -126,8 +126,11 @@ cd sync
 ../venv/bin/python main.py fetch --dry-run
 ```
 
-That reads the last 30 days, categorizes, and prints what it would write without
-saving anything.
+That reads the same rolling window as a scheduled pass, categorizes, and prints
+what it would write without saving anything. The window includes today and a
+two-day overlap for pending or late bookings; `days_back` (30 by default) is
+only the maximum catch-up horizon. The checkpoint records the last closed day,
+so it never advances beyond yesterday while today's bank day is still changing.
 
 **Watch the quota.** Most banks allow only a few API calls per account per day
 through PSD2, shared across everything you run. A handful of `--dry-run` calls
@@ -140,6 +143,16 @@ Then let the timer take over:
 ```bash
 sudo systemctl enable --now money-badger-sync.timer
 ```
+
+You can schedule one pass or one after each of your bank's incoming settlement
+sessions. Every pass makes one transaction request per account. Stable Enable
+Banking ids deduplicate the overlap, and new rows are atomically merged into one
+cumulative `moneypro_<account>_<today>.csv` before the checkpoint moves.
+
+Count the separate weekly balance check too. With a typical limit of about four
+calls per account per day, three session passes plus that check consume all four
+on its scheduled day, leaving no safe watchdog reserve. See
+[Scheduling](CONFIGURATION.md#scheduling).
 
 ---
 

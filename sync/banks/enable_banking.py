@@ -128,6 +128,11 @@ class EnableBankingFetcher:
         # can say why. Kept alongside last_skipped, which stays a plain list[str] —
         # test_skipped_accounts.py asserts on that shape.
         self.skip_reasons: dict[str, str] = {}
+        # A smart-window cap is a permanent data gap, not a transient account
+        # failure: retrying the same request cannot recover dates older than
+        # days_back. Keep it separate from last_skipped so the run succeeds,
+        # while the summary can still surface it loudly.
+        self.window_warnings: dict[str, str] = {}
 
     def _headers(self) -> dict:
         token = _make_jwt(self.app_id, self.private_key_path)
@@ -301,15 +306,18 @@ class EnableBankingFetcher:
               fallback_dates: dict | None = None, dry_run: bool = False) -> list[tuple[str, list[dict]]]:
         """Fetch transactions. Returns list of (iban_without_PL, [tx_dict]).
 
-        Smart window (use_smart_window=True): per-IBAN date_from = last_fetch + 1 day,
-        capped at days_back (days_back is a MAX catch-up window, not the normal
-        increment — in steady state only 1 day is fetched per run).
+        Smart window (use_smart_window=True): last_fetch is the last CLOSED day,
+        never the open current day. date_from is the earlier of last_fetch + 1
+        and today - 2 days, capped at days_back. Every intraday pass requests
+        through today; committed seen IDs remove overlap and replay duplicates.
         Forced mode (use_smart_window=False): always fetches last days_back days.
 
         fallback_dates: {full_iban: "YYYY-MM-DD"} — used when there is no local
         last_fetch state for an IBAN (e.g. state file lost/reset). Instead of
         blindly capping to days_back, resume from the last known transaction
-        date for that account (still capped at days_back as a floor).
+        date for that account, with the same two-day overlap and days_back cap.
+        If either checkpoint is older than the cap, window_warnings records the
+        permanently omitted range without classifying the account as failed.
 
         IMPORTANT: this method no longer advances the last_fetch checkpoint or
         persists dedup IDs by itself — it only stages them in self._pending.
@@ -326,12 +334,15 @@ class EnableBankingFetcher:
         sessions = state.get("sessions", {})
         last_fetches = state.get("last_fetch", {})
         seen_by_date = state.get("seen_tx_ids", {})  # {full_iban: {"YYYY-MM-DD": [ids]}}
+        today = date.today().isoformat()
         yesterday = (date.today() - timedelta(days=1)).isoformat()
+        overlap_date = (date.today() - timedelta(days=2)).isoformat()
         cap_date = (date.today() - timedelta(days=days_back)).isoformat()
         fallback_dates = fallback_dates or {}
         results = []
         self.last_skipped = []
         self.skip_reasons = {}
+        self.window_warnings = {}
 
         for iban in ibans:
             full_iban = _iban.full_iban(iban, self.iban_country)
@@ -363,23 +374,33 @@ class EnableBankingFetcher:
                 self.skip_reasons[bare_iban] = "session expired (401)"
                 continue
 
-            # Determine date_from per IBAN
+            # A checkpoint older than cap_date means part of the gap is outside
+            # this request. Report that permanent omission, but do not turn it
+            # into a retryable account failure.
             if use_smart_window and full_iban in last_fetches:
                 next_day = (date.fromisoformat(last_fetches[full_iban]) + timedelta(days=1)).isoformat()
-                date_from = max(next_day, cap_date)
+                if next_day < cap_date:
+                    omitted_to = (date.fromisoformat(cap_date) - timedelta(days=1)).isoformat()
+                    warning = (f"fetch window capped at {days_back} days; dates "
+                               f"{next_day}..{omitted_to} were not requested")
+                    self.window_warnings[bare_iban] = warning
+                    print(f"  [{bare_iban[-10:]}...] WARNING: permanent data gap: {warning}")
+                date_from = max(min(next_day, overlap_date), cap_date)
             elif use_smart_window and full_iban in fallback_dates:
                 next_day = (date.fromisoformat(fallback_dates[full_iban]) + timedelta(days=1)).isoformat()
-                date_from = max(next_day, cap_date)
+                if next_day < cap_date:
+                    omitted_to = (date.fromisoformat(cap_date) - timedelta(days=1)).isoformat()
+                    warning = (f"fallback window capped at {days_back} days; dates "
+                               f"{next_day}..{omitted_to} were not requested")
+                    self.window_warnings[bare_iban] = warning
+                    print(f"  [{bare_iban[-10:]}...] WARNING: permanent data gap: {warning}")
+                date_from = max(min(next_day, overlap_date), cap_date)
                 print(f"  [{bare_iban[-10:]}...] no local state — resuming from the app's last transaction ({fallback_dates[full_iban]})")
             else:
                 date_from = cap_date
 
-            if date_from > yesterday:
-                print(f"  [{bare_iban[-10:]}...] already up to date (last_fetch={last_fetches.get(full_iban, '—')}), skipping")
-                continue
-
-            print(f"  Fetching {bare_iban[-10:]}... (from {date_from} to {yesterday})")
-            params = {"date_from": date_from, "date_to": yesterday}
+            print(f"  Fetching {bare_iban[-10:]}... (from {date_from} to {today})")
+            params = {"date_from": date_from, "date_to": today}
             r = requests.get(
                 f"{EB_BASE}/accounts/{account_id}/transactions",
                 headers=self._headers(),
@@ -407,9 +428,21 @@ class EnableBankingFetcher:
             r.raise_for_status()
             body = r.json()
             raw_txs = body.get("transactions", [])
-            _dump_raw_pull(self.state_file, bare_iban, date_from, yesterday, body)
+            _dump_raw_pull(self.state_file, bare_iban, date_from, today, body)
             print(f"  → {len(raw_txs)} transactions")
 
+            # Keep the complete response above for diagnostics. Only the
+            # explicit pending status is skipped; missing or unknown statuses
+            # are treated like booked rows because some connectors omit it.
+            pending_count = sum(
+                1 for tx in raw_txs if str(tx.get("status", "")).upper() == "PDNG"
+            )
+            if pending_count:
+                print(f"  → skipping {pending_count} pending transaction(s) (PDNG)")
+            raw_txs = [
+                tx for tx in raw_txs
+                if str(tx.get("status", "")).upper() != "PDNG"
+            ]
             converted = [self._convert_tx(tx, bare_iban) for tx in raw_txs]
 
             # Deduplicate against previously *committed* seen IDs only (not
@@ -433,6 +466,8 @@ class EnableBankingFetcher:
             results.append((bare_iban, converted))
 
             # Staged, not saved — see commit_fetch().
+            # Today remains open for later passes; only yesterday becomes the
+            # newest durable checkpoint.
             self._pending[full_iban] = {"last_fetch": yesterday, "seen_ids": iban_seen}
 
             time.sleep(2)
@@ -448,7 +483,11 @@ class EnableBankingFetcher:
         if not pending:
             return
         state = self._load_state()
-        state.setdefault("last_fetch", {})[full_iban] = pending["last_fetch"]
+        # Defensive clamp: even a caller that stages today cannot close the
+        # current bank day and make later same-day rows unreachable.
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        state.setdefault("last_fetch", {})[full_iban] = min(
+            pending["last_fetch"], yesterday)
         state.setdefault("seen_tx_ids", {})[full_iban] = pending["seen_ids"]
         self._save_state(state)
 

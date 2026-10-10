@@ -9,6 +9,8 @@
     "00000000000000000000000001": "Main account",
     "00000000000000000000000002": "Partner account"
   },
+  "_comment_account_holders": "Optional full names that appear in bank descriptions. Learn rejects a rule whose entire key is only one of these names; longer phrases remain allowed.",
+  "account_holders": ["Alex Example", "Sam Example"],
   "own_ibans": [
     "00000000000000000000000001",
     "00000000000000000000000002"

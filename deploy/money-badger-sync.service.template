@@ -1,5 +1,5 @@
 [Unit]
-Description=Money Badger - daily bank fetch and push
+Description=Money Badger - scheduled bank fetch and push pass
 After=network-online.target
 Wants=network-online.target
 

@@ -57,8 +57,15 @@ DEFAULT_MODELS = {
     # unmatched transaction, so it wants the cheap model; rule learning runs once
     # a day over a handful of examples and wants the better one. Both are
     # eventually retired, and _substitute() is what carries those installs over.
-    'categorize': 'claude-haiku-4-5-20251001',
-    'learn': 'claude-sonnet-4-6',
+    'categorize': 'claude-haiku-5-5',
+    'learn': 'claude-sonnet-5-5',
+}
+
+# Anthropic 5.5 models accept adaptive effort. Do not send it to an older model
+# explicitly selected through LLM_MODEL or the installer picker.
+MODEL_KWARGS = {
+    'claude-haiku-5-5': {'output_config': {'effort': 'medium'}},
+    'claude-sonnet-5-5': {'output_config': {'effort': 'medium'}},
 }
 
 # Requested id -> what the provider actually had, for the rest of this process.
@@ -71,6 +78,14 @@ class ModelNotFound(RuntimeError):
 
 class _ParamRejected(RuntimeError):
     """The provider refused a request parameter — not the model itself."""
+
+
+class LLMRefusalError(RuntimeError):
+    """The provider returned a successful response but refused the task."""
+
+
+class LLMResponseError(RuntimeError):
+    """The provider returned no complete text that callers can parse."""
 
 
 def provider() -> str:
@@ -164,10 +179,19 @@ def list_models(api_key: str = None) -> list:
                   for m in body.get('data', []) if m.get('id'))
 
 
+def _family(model: str) -> str:
+    """A stable family key; Anthropic families include their tier name."""
+    lower = model.lower()
+    for family in ('claude-haiku', 'claude-sonnet', 'claude-opus'):
+        if lower.startswith(family):
+            return family
+    return re.split(r'[-._:/]', model)[0].lower()
+
+
 def _closest(model: str, available: list):
     """The nearest id of the same family, or None when the family is gone too."""
-    family = re.split(r'[-._:/]', model)[0].lower()
-    same = [m for m in available if re.split(r'[-._:/]', m)[0].lower() == family]
+    family = _family(model)
+    same = [m for m in available if _family(m) == family]
     if not same:
         return None
     return max(same, key=lambda m: (len(os.path.commonprefix([model, m])), m))
@@ -198,18 +222,19 @@ def complete(prompt: str, task: str = 'categorize', system: str = None,
     model = _model(task)
     model = _substitutes.get(model, model)  # already repaired earlier in this run
     try:
-        return _send(model, prompt, system, max_tokens, api_key)
+        return _send(model, prompt, task, system, max_tokens, api_key)
     except ModelNotFound as e:
-        return _send(_substitute(model, e, api_key), prompt, system, max_tokens, api_key)
+        return _send(_substitute(model, e, api_key), prompt, task, system,
+                     max_tokens, api_key)
 
 
-def _send(model, prompt, system, max_tokens, api_key):
+def _send(model, prompt, task, system, max_tokens, api_key):
     if provider() == 'anthropic' and not os.environ.get('LLM_BASE_URL'):
-        return _complete_anthropic(model, prompt, system, max_tokens, api_key)
+        return _complete_anthropic(model, prompt, task, system, max_tokens, api_key)
     return _complete_openai(model, prompt, system, max_tokens)
 
 
-def _complete_anthropic(model, prompt, system, max_tokens, api_key):
+def _complete_anthropic(model, prompt, task, system, max_tokens, api_key):
     # Imported here, not at module level: the BASIC and bank-only installs never
     # call this and shouldn't need the SDK installed at all.
     import anthropic
@@ -217,13 +242,41 @@ def _complete_anthropic(model, prompt, system, max_tokens, api_key):
     client = anthropic.Anthropic(api_key=api_key or os.environ.get('ANTHROPIC_API_KEY'))
     kwargs = {'model': model, 'max_tokens': max_tokens,
               'messages': [{'role': 'user', 'content': prompt}]}
+    kwargs.update(MODEL_KWARGS.get(model, {}))
     if system:
         kwargs['system'] = system
     try:
-        msg = client.messages.create(**kwargs)
+        if task == 'learn' and model == 'claude-sonnet-5-5':
+            msg = client.beta.messages.create(
+                **kwargs,
+                betas=['server-side-fallback-2026-07-01'],
+                fallbacks='default',
+            )
+        else:
+            msg = client.messages.create(**kwargs)
     except anthropic.NotFoundError as e:
         raise ModelNotFound(str(e)) from None
-    return msg.content[0].text
+    return _anthropic_text(msg)
+
+
+def _anthropic_text(msg) -> str:
+    """Join text blocks after any thinking blocks and validate completion."""
+    stop_reason = getattr(msg, 'stop_reason', None)
+    if stop_reason == 'refusal':
+        raise LLMRefusalError('Anthropic refused the request')
+    if stop_reason == 'max_tokens':
+        raise LLMResponseError('Anthropic response was cut off at max_tokens')
+
+    texts = []
+    for block in getattr(msg, 'content', []):
+        block_type = block.get('type') if isinstance(block, dict) else getattr(block, 'type', None)
+        if block_type == 'text':
+            text = block.get('text', '') if isinstance(block, dict) else getattr(block, 'text', '')
+            texts.append(text)
+    result = ''.join(texts)
+    if not result.strip():
+        raise LLMResponseError('Anthropic response contained no text block')
+    return result
 
 
 def _complete_openai(model, prompt, system, max_tokens):

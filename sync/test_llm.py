@@ -5,10 +5,14 @@ the same shape at a different URL — is exercised against a local HTTP server, 
 the Anthropic one is never called here.
 """
 import json
+import io
 import os
-import threading
+import sys
+import urllib.error
+import urllib.parse
 from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -64,61 +68,70 @@ def test_extract_json_survives_fences_and_chatter():
     assert llm.extract_json('{"k": "v"}') == {'k': 'v'}
 
 
-class _Stub(BaseHTTPRequestHandler):
-    """An OpenAI-compatible endpoint: /chat/completions and /models."""
+class _FakeHTTPResponse:
+    def __init__(self, body):
+        self.body = json.dumps(body).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return self.body
+
+
+class _Stub:
+    """A socket-free OpenAI-compatible /chat/completions and /models fake."""
 
     models = ()
     retired = ()
     list_broken = False
     requests = []
 
-    def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        self._record(body)
+    @classmethod
+    def urlopen(cls, request, timeout=None):
+        body = json.loads(request.data) if request.data else None
+        parsed = urllib.parse.urlparse(request.full_url)
+        cls.requests.append({
+            'path': parsed.path,
+            'body': body,
+            'auth': request.get_header('Authorization'),
+            'timeout': timeout,
+        })
+        if request.get_method() == 'GET':
+            if cls.list_broken:
+                return cls._http_error(request.full_url, 500, {
+                    'error': {'message': 'upstream on fire'}})
+            return _FakeHTTPResponse({'data': [{'id': m} for m in cls.models]})
+
         if body['model'] in _Stub.retired:
-            return self._reply(404, {'error': {
+            return cls._http_error(request.full_url, 404, {'error': {
                 'code': 'model_not_found',
                 'message': f"The model `{body['model']}` does not exist"}})
         if body['model'].startswith('gpt-5') and 'max_tokens' in body:
-            return self._reply(400, {'error': {'message':
+            return cls._http_error(request.full_url, 400, {'error': {'message':
                 "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens'."}})
-        self._reply(200, {'choices': [{'message': {
+        return _FakeHTTPResponse({'choices': [{'message': {
             'content': '[{"idx": 0, "category": "Groceries"}]'}}]})
 
-    def do_GET(self):
-        self._record(None)
-        if _Stub.list_broken:
-            return self._reply(500, {'error': {'message': 'upstream on fire'}})
-        self._reply(200, {'data': [{'id': m} for m in _Stub.models]})
-
-    def _record(self, body):
-        _Stub.requests.append({'path': self.path, 'body': body,
-                               'auth': self.headers.get('Authorization')})
-
-    def _reply(self, code, body):
+    @staticmethod
+    def _http_error(url, code, body):
         raw = json.dumps(body).encode()
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def log_message(self, *args):
-        pass
+        raise urllib.error.HTTPError(url, code, 'offline fake', {}, io.BytesIO(raw))
 
 
 @contextmanager
 def _stub(models=(), retired=(), list_broken=False):
     _Stub.models, _Stub.retired, _Stub.requests = models, retired, []
     _Stub.list_broken = list_broken
-    server = HTTPServer(('127.0.0.1', 0), _Stub)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
     _clear_env()
-    try:
-        yield f'http://127.0.0.1:{server.server_port}/v1'
-    finally:
-        server.shutdown()
-        _clear_env()
+    with patch.object(llm.urllib.request, 'urlopen', _Stub.urlopen):
+        try:
+            yield 'http://offline.invalid/v1'
+        finally:
+            _clear_env()
 
 
 def test_openai_backend_speaks_the_chat_completions_shape():
@@ -237,3 +250,225 @@ def test_categorization_falls_back_to_check_me_without_an_llm(monkeypatch):
     out = main.categorize_transactions(txs, cfg, api_key='')
     assert out[0]['category'] == 'Groceries'
     assert out[1]['category'] == 'CHECK ME'
+
+
+class _FakeMessages:
+    def __init__(self, reply, calls):
+        self.reply = reply
+        self.calls = calls
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.reply
+
+
+def _reply(stop_reason='end_turn', *blocks):
+    return SimpleNamespace(stop_reason=stop_reason, content=list(blocks))
+
+
+def _block(block_type, text=None):
+    values = {'type': block_type}
+    if text is not None:
+        values['text'] = text
+    return SimpleNamespace(**values)
+
+
+def _install_fake_anthropic(monkeypatch, standard_reply=None, beta_reply=None):
+    standard_calls = []
+    beta_calls = []
+    standard_reply = standard_reply or _reply('end_turn', _block('text', '{}'))
+    beta_reply = beta_reply or standard_reply
+    client = SimpleNamespace(
+        messages=_FakeMessages(standard_reply, standard_calls),
+        beta=SimpleNamespace(messages=_FakeMessages(beta_reply, beta_calls)),
+    )
+
+    class FakeNotFoundError(Exception):
+        pass
+
+    fake_module = SimpleNamespace(
+        Anthropic=lambda **_kwargs: client,
+        NotFoundError=FakeNotFoundError,
+    )
+    monkeypatch.setitem(sys.modules, 'anthropic', fake_module)
+    return standard_calls, beta_calls
+
+
+def _anthropic_env(monkeypatch, model=None):
+    monkeypatch.setenv('LLM_PROVIDER', 'anthropic')
+    monkeypatch.setenv('ANTHROPIC_API_KEY', 'fake-key')
+    monkeypatch.delenv('LLM_BASE_URL', raising=False)
+    if model is None:
+        monkeypatch.delenv('LLM_MODEL', raising=False)
+    else:
+        monkeypatch.setenv('LLM_MODEL', model)
+
+
+def test_anthropic_joins_text_blocks_after_thinking(monkeypatch):
+    _anthropic_env(monkeypatch)
+    calls, _ = _install_fake_anthropic(
+        monkeypatch,
+        _reply('end_turn', _block('thinking'), _block('text', 'one'),
+               _block('text', ' two')),
+    )
+    assert llm.complete('prompt', task='categorize') == 'one two'
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ('reply', 'error', 'message'),
+    [
+        (_reply('refusal'), llm.LLMRefusalError, 'refused'),
+        (_reply('max_tokens', _block('text', 'partial')), llm.LLMResponseError, 'cut off'),
+        (_reply('end_turn', _block('thinking')), llm.LLMResponseError, 'no text'),
+    ],
+)
+def test_anthropic_rejects_refused_incomplete_or_textless_responses(
+        monkeypatch, reply, error, message):
+    _anthropic_env(monkeypatch)
+    _install_fake_anthropic(monkeypatch, reply)
+    with pytest.raises(error, match=message):
+        llm.complete('prompt', task='categorize')
+
+
+def test_categorize_uses_haiku_55_effort_and_large_budget(monkeypatch):
+    _anthropic_env(monkeypatch)
+    calls, beta_calls = _install_fake_anthropic(
+        monkeypatch,
+        _reply('end_turn', _block('text', '[{"idx": 0, "category": "Groceries"}]')),
+    )
+    monkeypatch.setattr(main, '_categories', (
+        'EXPENSES:\n  Groceries\n', {'Groceries', 'CHECK ME'}))
+    tx = {'title': 'SHOP', 'counterpart': '', 'amount': -10.0,
+          'transaction_date': '2032-10-09'}
+
+    main._categorize_batch([tx], api_key='fake-key')
+
+    assert beta_calls == []
+    sent = calls[0]
+    assert sent['model'] == 'claude-haiku-5-5'
+    assert sent['max_tokens'] == 16000
+    assert sent['output_config'] == {'effort': 'medium'}
+    for forbidden in ('temperature', 'top_p', 'top_k', 'thinking', 'fallbacks', 'betas'):
+        assert forbidden not in sent
+
+
+def test_learn_uses_sonnet_55_effort_and_server_fallback(monkeypatch):
+    _anthropic_env(monkeypatch)
+    calls, beta_calls = _install_fake_anthropic(
+        monkeypatch,
+        beta_reply=_reply('end_turn', _block('thinking'), _block('text', '{}')),
+    )
+    monkeypatch.setattr(main, '_categories', (
+        'EXPENSES:\n  Groceries\n', {'Groceries', 'CHECK ME'}))
+
+    assert main.generate_new_rules(
+        [{'category': 'Groceries', 'description': 'SHOP', 'amount': -10.0}],
+        api_key='fake-key') == {}
+
+    assert calls == []
+    sent = beta_calls[0]
+    assert sent['model'] == 'claude-sonnet-5-5'
+    assert sent['max_tokens'] == 16000
+    assert sent['output_config'] == {'effort': 'medium'}
+    assert sent['betas'] == ['server-side-fallback-2026-07-01']
+    assert sent['fallbacks'] == 'default'
+    for forbidden in ('temperature', 'top_p', 'top_k', 'thinking'):
+        assert forbidden not in sent
+
+
+def test_explicit_older_model_gets_no_55_only_parameters(monkeypatch):
+    _anthropic_env(monkeypatch, model='claude-haiku-4-5-20251001')
+    calls, beta_calls = _install_fake_anthropic(
+        monkeypatch, _reply('end_turn', _block('text', 'answer')))
+    assert llm.complete('prompt', task='learn', max_tokens=16000) == 'answer'
+    assert beta_calls == []
+    sent = calls[0]
+    for forbidden in ('output_config', 'fallbacks', 'betas', 'thinking',
+                      'temperature', 'top_p', 'top_k'):
+        assert forbidden not in sent
+
+
+def test_retired_haiku_substitution_stays_in_haiku_family():
+    available = ['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-4-1']
+    assert llm._closest('claude-haiku-4-5-20251001', available) == 'claude-haiku-5-5'
+
+
+def test_categorize_refusal_becomes_check_me_without_retry(monkeypatch, capsys):
+    _anthropic_env(monkeypatch)
+    _install_fake_anthropic(monkeypatch, _reply('refusal'))
+    monkeypatch.setattr(main, '_categories', (
+        'EXPENSES:\n  Groceries\n', {'Groceries', 'CHECK ME'}))
+    tx = {'title': 'MYSTERY', 'counterpart': '', 'amount': -10.0,
+          'transaction_date': '2032-10-09'}
+    out = main._categorize_batch([tx], api_key='fake-key')
+    assert out[0]['category'] == 'CHECK ME'
+    assert 'LLM refusal' in out[0]['note']
+    assert 'refused' in capsys.readouterr().out
+
+
+def test_learn_refusal_preserves_rules_and_correction(monkeypatch, tmp_path):
+    _anthropic_env(monkeypatch)
+    _install_fake_anthropic(monkeypatch, beta_reply=_reply('refusal'))
+    corrections = tmp_path / 'Corrections'
+    corrections.mkdir()
+    correction = corrections / 'budget_corrections_test.csv'
+    correction.write_text(
+        'Date;Amount;Category;Description;Transaction Type\n'
+        '2032-10-09;10.00;Groceries;SHOP;Expense\n', encoding='utf-8')
+    rules = tmp_path / 'rules.json'
+    original = '{"keywords": {"old": "Groceries"}}'
+    rules.write_text(original, encoding='utf-8')
+    monkeypatch.setattr(main, 'RULES_FILE', rules)
+    monkeypatch.setattr(main, 'load_config', lambda: {'corrections_dir': str(corrections)})
+    monkeypatch.setattr(main, 'load_env', lambda: {'ANTHROPIC_API_KEY': 'fake-key'})
+    monkeypatch.setattr(main, '_categories', (
+        'EXPENSES:\n  Groceries\n', {'Groceries', 'CHECK ME'}))
+
+    with pytest.raises(llm.LLMRefusalError):
+        main.cmd_learn(SimpleNamespace(dry_run=False))
+
+    assert rules.read_text(encoding='utf-8') == original
+    assert correction.exists()
+    assert not (corrections / 'processed').exists()
+
+
+def test_learn_fake_llm_does_not_save_holder_only_rule(monkeypatch, tmp_path):
+    _anthropic_env(monkeypatch)
+    learned = {
+        'keywords': {'Alex Example': 'Groceries'},
+        'merchant_map': {},
+        'patterns': [
+            {'pattern': ' ALEX   EXAMPLE ', 'category': 'Groceries', 'priority': 1},
+            {'pattern': 'therapy alex example', 'category': 'Groceries', 'priority': 1},
+        ],
+    }
+    _install_fake_anthropic(
+        monkeypatch,
+        beta_reply=_reply('end_turn', _block('text', json.dumps(learned))),
+    )
+    corrections = tmp_path / 'Corrections'
+    corrections.mkdir()
+    correction = corrections / 'budget_corrections_test.csv'
+    correction.write_text(
+        'Date;Amount;Category;Description;Transaction Type\n'
+        '2032-10-09;10.00;Groceries;therapy payment;Expense\n', encoding='utf-8')
+    rules = tmp_path / 'rules.json'
+    rules.write_text(
+        '{"keywords": {}, "merchant_map": {}, "patterns": []}', encoding='utf-8')
+    monkeypatch.setattr(main, 'RULES_FILE', rules)
+    monkeypatch.setattr(main, 'load_config', lambda: {
+        'corrections_dir': str(corrections),
+        'account_holders': [' alex example '],
+    })
+    monkeypatch.setattr(main, 'load_env', lambda: {'ANTHROPIC_API_KEY': 'fake-key'})
+    monkeypatch.setattr(main, '_categories', (
+        'EXPENSES:\n  Groceries\n', {'Groceries', 'CHECK ME'}))
+
+    main.cmd_learn(SimpleNamespace(dry_run=False))
+
+    saved = json.loads(rules.read_text(encoding='utf-8'))
+    assert saved['keywords'] == {}
+    assert [p['pattern'] for p in saved['patterns']] == ['therapy alex example']
+    assert not correction.exists()
+    assert (corrections / 'processed' / correction.name).exists()

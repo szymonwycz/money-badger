@@ -27,12 +27,13 @@ RULES = [{
 def fake_tx(amount, counterpart_iban=IBAN):
     return {
         "amount": amount,
-        "title": "Przelew środków własnych — między twoimi kontami",
-        "counterpart": "Konto zewnętrzne",
+        "title": "Transfer between own accounts",
+        "counterpart": "External account",
         "counterpart_iban": counterpart_iban,  # already normalized (no "PL", no spaces), matches normalize_iban() output
         "transaction_date": "2026-07-10",
         "category": "",
         "note": "",
+        "_eb_id": "synthetic-eb-id",
         "_transfer": True,
         "_savings": False,
         "_to_account": "",
@@ -51,9 +52,10 @@ def test_splits_into_three_matching_categories_and_sum():
     total = sum(r["amount"] for r in result)
     assert abs(total - original_amount) < 0.001, f"sum mismatch: {total} != {original_amount}"
 
-    for r in result:
+    for index, r in enumerate(result):
         assert r["_transfer"] is False
         assert r["_to_account"] == ""
+        assert r["_eb_id"] == f"synthetic-eb-id#{index}"
 
     insurance_row = next(r for r in result if r["category"] == "Housing: Insurance")
     assert abs(insurance_row["amount"] - (-200.00)) < 0.001

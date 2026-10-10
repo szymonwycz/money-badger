@@ -77,9 +77,8 @@ here.
 
 ### Models
 
-No model ids are baked into the app. `install.sh` asks the provider what it
-offers after you paste the key, and writes your choice to `LLM_MODEL`. To see the
-same list later:
+`install.sh` asks the provider what it offers after you paste the key, and writes
+your choice to `LLM_MODEL`. To see the same list later:
 
 ```bash
 venv/bin/python sync/llm.py --models
@@ -97,10 +96,12 @@ the same family, and logs the swap:
 If nothing in that family is on offer, or the list cannot be fetched, the run
 stops with the ids that *are* available rather than quietly categorizing nothing.
 
-On Anthropic, leaving `LLM_MODEL` empty keeps the original behaviour: a cheap
-model for categorizing (it runs on every unmatched transaction) and a stronger
-one for learning rules (once a day, over a handful of examples). Setting
-`LLM_MODEL` collapses that to one model for both.
+On Anthropic, leaving `LLM_MODEL` empty uses Claude Haiku 5.5 for categorizing
+(it runs on every unmatched transaction) and Claude Sonnet 5.5 for learning
+rules. Both use medium effort. Sonnet learning also enables Anthropic's
+server-side fallback; Haiku categorization does not. Setting `LLM_MODEL`
+collapses both tasks to that one model. An explicitly selected older model is
+honoured and receives none of the 5.5-only effort/fallback parameters.
 
 ### Optional integrations
 
@@ -150,6 +151,7 @@ copied to another machine.
 
 ```json
 "account_names": { "00000000000000000000000001": "Main account" },
+"account_holders": [ "Alex Example", "Sam Example" ],
 "own_ibans":     [ "00000000000000000000000001" ],
 "savings_ibans": [ ]
 ```
@@ -158,6 +160,11 @@ IBANs without the country prefix and without spaces. The names must match your
 account names in the app exactly, or imported transactions land on the wrong
 account. Money arriving from a `savings_ibans` account is treated as drawing on
 your own savings, not as new income.
+
+`account_holders` is optional. Put each holder's full name there as it appears
+in bank descriptions. Rule learning rejects a keyword, merchant or pattern that
+consists only of that name, because it would match unrelated transfers and
+invoices. More specific phrases containing the name remain allowed.
 
 ### Filters
 
@@ -233,6 +240,12 @@ Local knowledge the category names alone don't convey:
 common case of all your accounts being at one bank. See
 [ENABLE_BANKING.md](ENABLE_BANKING.md).
 
+`days_back` is a safety cap for catching up after an outage, not the normal
+request size. Every scheduled pass includes today and a two-day overlap; its
+checkpoint advances only through yesterday, leaving the current bank day open
+for later passes. If an outage exceeds `days_back`, the pipeline reports the
+permanently skipped dates instead of silently jumping over them.
+
 ---
 
 ## `sync/rules.json`
@@ -263,17 +276,19 @@ trailing space no longer saves you.
 ## Scheduling
 
 `install.sh` asks when to sync — one time, or several separated by commas — plus
-how many attempts a day in total, and renders the systemd timers from that. To
-change it later, edit the `OnCalendar` lines in
+how many transaction-fetch attempts a day to schedule, and renders the systemd
+timers from that. To change it later, edit the `OnCalendar` lines in
 `/etc/systemd/system/money-badger-sync*.timer` and run `sudo systemctl daemon-reload`.
 
 `Persistent=true` is set on both timers, so systemd replays a trigger it thinks
 was missed. Restarting a timer after a time that has already passed today
 therefore runs a pass immediately — expected, but it does spend a bank API call.
 
-Retries are free when the day's sync already succeeded — the run is skipped — but
-each genuine retry spends one bank API call, and most banks allow only a handful
-per day.
+Retries are free when an earlier pass already left the day's success marker — the
+watchdog stands down — but each genuine retry spends one bank API call per
+account. The separate weekly balance check also spends one call per account on
+its scheduled day; it is not included in the installer's transaction-attempt
+number.
 
 ### More than one fetch a day
 
@@ -288,16 +303,20 @@ a quarter of an hour after each one:
 | 11:00, 15:00, 17:30 | `11:15,15:15,17:45` |
 | once, overnight | `10:30` |
 
-The installer renders one `OnCalendar` line per time and spreads whatever attempts
-are left over onto the watchdog. Ask for enough attempts to cover the passes and
-one retry — with a typical quota of four calls per account per day, three passes
-plus one retry is the ceiling. Beyond it the bank answers 429 and skips that
-account until midnight.
+The installer renders one `OnCalendar` line per time and spreads spare
+transaction attempts onto the watchdog. Budget against all bank calls, not only
+that number. With a typical quota of about four calls per account per day, three
+session passes already use three. On the weekly balance-check day the balance
+request is call four, leaving no reserve for a watchdog fetch. Configuring a
+fourth transaction attempt may therefore reach 429 that day. Quotas differ by
+bank; leave headroom rather than treating four as guaranteed.
 
 The watchdog is deliberately pushed to the end of the day when there are several
 passes: an earlier retry would fall between your own passes and spend a call right
-before one of them. If every attempt goes to a pass, the watchdog timer isn't
-installed at all.
+before one of them. It only retries when no earlier pass that day completed; it
+does not retry a failed late pass after an earlier pass succeeded. That late
+pass's rows remain reachable through the next day's overlap. If every transaction
+attempt goes to a scheduled pass, the watchdog timer is not installed.
 
 Telegram only speaks up when a pass brings new transactions or an account fails, so
 the extra passes stay quiet on a slow day. The daily self-checker report is what

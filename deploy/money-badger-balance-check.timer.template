@@ -4,7 +4,8 @@ Description=Check bank balances weekly
 # and this is only a drift check - balances are computed from transactions.
 # 05:30, not 02:30: the bank's nightly service window answered 400 for every
 # account on 2026-07-18 and 2026-09-26. Still the first call of the day, so it
-# keeps the free quota slot ahead of the daytime transaction syncs.
+# runs ahead of the daytime transaction syncs. Count it in the bank's daily
+# quota: three transaction passes plus this check are already four calls.
 
 [Timer]
 OnCalendar=Sat *-*-* 05:30:00
