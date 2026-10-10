@@ -5,6 +5,23 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
 ## Unreleased
 
 ### Fixed
+- **Intraday bank passes now fetch the open current day safely.** Every pass asks
+  through today with a two-day overlap, while the durable checkpoint is clamped
+  to yesterday. Explicit `PDNG` rows wait until booked; missing/unknown statuses
+  remain importable. A catch-up gap beyond `days_back` is reported in the run
+  summary and Telegram without misclassifying the account as failed.
+- **Later sync passes no longer overwrite the day's earlier CSV.** Each account's
+  daily outbox is merged by the Enable Banking id stored in `Check #` (split rows
+  use `#0`, `#1`, ...), then atomically replaced before the fetch checkpoint is
+  committed. CSV fields are serialized with `csv.writer`, so semicolons, quotes
+  or line breaks in bank/LLM text cannot shift the transaction type or category.
+- **Bulk import rejects unknown transaction types per row.** The valid remainder
+  of the batch is still accepted, while the malformed row's hash stays unaccepted
+  so the sender continues to report it instead of storing balance-corrupting data.
+- **Rule learning drops holder-name-only rules.** Optional `account_holders` in
+  `sync/config.json` protects unrelated transfers and invoices from a rule whose
+  entire keyword, merchant or pattern is just a holder's name; longer phrases
+  containing that name remain valid.
 - **Two pipelines could run at once.** Both sync timers carry `Persistent=true`, so
   a machine that was off at the scheduled time replays the missed sync and the
   missed watchdog in the same second — and the watchdog, seeing no success marker
@@ -22,6 +39,17 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   the installer into `deploy/schedule.py`, with `tests/test_schedule.py` over it.
 
 ### Changed
+- **Anthropic defaults moved to Claude Haiku 5.5 for categorization and Claude
+  Sonnet 5.5 for learning.** Both use medium effort and a 16,000-token response
+  budget. Thinking blocks are ignored while all text blocks are joined; refusals,
+  truncation and textless replies are handled explicitly. Categorization refusals
+  go to CHECK ME without retrying the bank fetch, learning refusals preserve the
+  correction files, and Sonnet learning alone opts into server-side fallback.
+  Explicitly selected older models receive none of the 5.5-only parameters.
+- **Scheduling documentation now counts every bank call.** Multiple daily passes
+  work against the open-day window. The separate weekly balance check also spends
+  quota: with a typical four-call limit, three transaction passes plus that check
+  leave no watchdog reserve on its scheduled day.
 - **Card payments read merchant first.** Some Polish banks send them as `VISA PLAT
   <card> PŁATNOŚĆ KARTĄ <amount> PLN  <merchant>`, burying the one part you check a
   category against. TRANSACTIONS, CHECK ME and the mobile list now show
