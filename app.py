@@ -993,6 +993,12 @@ def bulk_transactions():
             raise BadInput('each transaction must be an object')
         raw_cat = tx.get('category', '')
         row_type = tx.get('tx_type', 'Expense')
+        if row_type not in TX_TYPES:
+            # One malformed CSV row must not poison the rest of the batch, but
+            # arbitrary types corrupt balance direction. Omitting its hash from
+            # accepted makes push_actuals keep reporting/retrying that row.
+            app.logger.warning('bulk import: unknown tx_type, row skipped: %r', tx)
+            continue
         if raw_cat.strip().upper() == 'CHECK ME':
             # "CHECK ME" is a fallback label for uncertain EXPENSES (rules.json) that
             # also happens to be a real income category name — resolving it here would

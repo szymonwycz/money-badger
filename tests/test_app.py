@@ -1,6 +1,7 @@
 """Core-logic tests for Money Badger. Run: venv/bin/pytest tests/ -q"""
 import csv
 import io
+import json
 import os
 import sqlite3
 import sys
@@ -16,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import app as badger  # noqa: E402  (import after env var so init_db hits the test DB)
 from app import parse_flexible_date, next_month_year  # noqa: E402
 from presets import apply_preset, load_preset  # noqa: E402
+import push_actuals  # noqa: E402
 
 # Migrations create an empty schema; the starter data lives in a preset, same as
 # on a real first run. Tests build on the English household one.
@@ -592,6 +594,59 @@ def test_bulk_reports_accepted_hashes(client):
     assert 'acc-good' in res['accepted']
     assert 'acc-baddate' not in res['accepted']
     assert res['received'] == 2
+
+
+def test_bulk_rejects_unknown_type_but_accepts_rest_of_batch(client, db):
+    res = client.post('/api/transactions/bulk', json=[
+        {'date': '03/10/2032', 'amount': 10, 'account': 'Main account',
+         'category': 'Groceries', 'tx_type': 'Expense', 'hash': 'type-good'},
+        {'date': '03/10/2032', 'amount': 20, 'account': 'Main account',
+         'category': 'Salary', 'tx_type': 'tail of note]', 'hash': 'type-bad'},
+    ]).get_json()
+
+    assert res['inserted'] == 1
+    assert res['received'] == 2
+    assert res['accepted'] == ['type-good']
+    assert db.execute(
+        "SELECT 1 FROM transactions WHERE source_hash='type-good'"
+    ).fetchone() is not None
+    assert db.execute(
+        "SELECT 1 FROM transactions WHERE source_hash='type-bad'"
+    ).fetchone() is None
+
+
+def test_push_does_not_mark_unknown_type_as_sent(client, db, monkeypatch, tmp_path):
+    export_dir = tmp_path / 'Export'
+    export_dir.mkdir()
+    state_file = tmp_path / '.push_actuals_state.json'
+    (export_dir / 'moneypro_test.csv').write_text(
+        'Date;Amount;Account;Amount received;Account (to);Balance;Category;'
+        'Description;Transaction Type;Agent;Check #;Class;\n'
+        '04/10/2032, 01:00;10.00;Main account;;;;Groceries;good row;'
+        'Expense;;good-check;;\n'
+        '04/10/2032, 01:00;20.00;Main account;;;;Groceries;bad row;'
+        'tail of note];;bad-check;;',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(push_actuals, 'EXPORT_DIR', export_dir)
+    monkeypatch.setattr(push_actuals, 'STATE_FILE', state_file)
+
+    def post_to_test_app(path, data):
+        response = client.post(path, json=data)
+        assert response.status_code == 200
+        return response.get_json()
+
+    monkeypatch.setattr(push_actuals, 'post_json', post_to_test_app)
+    push_actuals.push()
+
+    good_hash = push_actuals.tx_hash('04/10/2032', 10.0, 'Main account', 'good row')
+    bad_hash = push_actuals.tx_hash('04/10/2032', 20.0, 'Main account', 'bad row')
+    state = json.loads(state_file.read_text(encoding='utf-8'))
+    assert good_hash in state['pushed_hashes']
+    assert bad_hash not in state['pushed_hashes']
+    assert db.execute(
+        'SELECT 1 FROM transactions WHERE source_hash=?', (bad_hash,)
+    ).fetchone() is None
 
 
 def test_bulk_accepts_already_stored_hash(client):
