@@ -304,6 +304,10 @@ class BadInput(Exception):
 class Conflict(Exception):
     """The request is valid, but conflicts with the current ledger state."""
 
+    def __init__(self, message, *, account_name=None):
+        super().__init__(message)
+        self.account_name = account_name
+
 
 @app.errorhandler(BadInput)
 def handle_bad_input(e):
@@ -312,7 +316,10 @@ def handle_bad_input(e):
 
 @app.errorhandler(Conflict)
 def handle_conflict(e):
-    return jsonify({'error': str(e)}), 409
+    body = {'error': str(e)}
+    if e.account_name:
+        body['account_name'] = e.account_name
+    return jsonify(body), 409
 
 
 @app.errorhandler(sqlite3.IntegrityError)
@@ -1266,16 +1273,19 @@ def get_unreviewed_transactions():
     All-time, not scoped to a month — a review inbox shouldn't lose items when you flip months."""
     db = get_db()
     rows = db.execute(
-        '''SELECT id, date, amount, account, description, tx_type,
-                  CASE WHEN counterpart_iban IS NOT NULL AND counterpart_iban != ''
+        '''SELECT t.id, t.date, t.amount, t.account, t.description, t.tx_type,
+                  CASE WHEN t.counterpart_iban IS NOT NULL AND t.counterpart_iban != ''
                        THEN 1 ELSE 0 END AS has_iban,
-                  CASE WHEN counterpart_iban IS NOT NULL AND counterpart_iban != ''
-                       THEN substr(counterpart_iban, -4) ELSE NULL END AS iban_last4
-           FROM transactions
-           WHERE category_id IS NULL AND income_category_id IS NULL
-             AND tx_type NOT IN ('Balance Adjust', 'Money Transfer')
-             AND ignored = 0
-           ORDER BY date DESC, id DESC'''
+                  CASE WHEN t.counterpart_iban IS NOT NULL AND t.counterpart_iban != ''
+                       THEN substr(t.counterpart_iban, -4) ELSE NULL END AS iban_last4,
+                  mapped.id AS counterpart_account_id,
+                  mapped.name AS counterpart_account_name
+           FROM transactions t
+           LEFT JOIN accounts mapped ON mapped.iban = t.counterpart_iban
+           WHERE t.category_id IS NULL AND t.income_category_id IS NULL
+             AND t.tx_type NOT IN ('Balance Adjust', 'Money Transfer')
+             AND t.ignored = 0
+           ORDER BY t.date DESC, t.id DESC'''
     ).fetchall()
 
     # tx_type is the direction signal — amount is always stored positive for
@@ -1339,14 +1349,18 @@ def assign_goal_transfer(tid):
         if account['name'] == tx['account']:
             raise Conflict('The source and goal accounts must be different.')
         if already and already['id'] != account['id']:
-            raise Conflict(f'This IBAN is already assigned to {already["name"]}.')
+            raise Conflict(f'This IBAN is already assigned to {already["name"]}.',
+                           account_name=already['name'])
         if account['iban'] and account['iban'] != iban:
-            raise Conflict('The selected account already has a different IBAN.')
+            raise Conflict(
+                f'The selected account {account["name"]} already has a different IBAN.',
+                account_name=account['name'])
         db.execute('UPDATE accounts SET iban=? WHERE id=?', (iban, account['id']))
         target_id, target_name = account['id'], account['name']
     else:
         if already:
-            raise Conflict(f'This IBAN is already assigned to {already["name"]}.')
+            raise Conflict(f'This IBAN is already assigned to {already["name"]}.',
+                           account_name=already['name'])
         existing_name = db.execute('SELECT 1 FROM accounts WHERE name=?', (new_name,)).fetchone()
         if existing_name:
             raise Conflict('An account with this name already exists.')

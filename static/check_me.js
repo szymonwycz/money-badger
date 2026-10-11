@@ -139,13 +139,20 @@ async function ignoreTransaction(txId) {
   await refresh();
 }
 
-function renderGoalAccounts() {
+function renderGoalAccounts(tx) {
   const select = document.getElementById('goal-account-select');
-  select.innerHTML = '<option value="">— choose an account —</option>'
-    + state.accounts
-      .filter(a => a.name !== goalTransaction?.account)
-      .map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')
-    + '<option value="__new__">＋ Create a new goal account…</option>';
+  const mappedId = tx.counterpart_account_id;
+  let options = state.accounts
+    .filter(a => a.name !== tx.account || a.id === mappedId)
+    .map(a => {
+      const match = a.id === mappedId;
+      return `<option value="${a.id}">${esc(a.name)}${match ? ' — IBAN match' : ''}</option>`;
+    }).join('');
+  if (mappedId && !state.accounts.some(a => a.id === mappedId)) {
+    options += `<option value="${mappedId}">${esc(tx.counterpart_account_name)} — IBAN match</option>`;
+  }
+  select.innerHTML = '<option value="">— choose an account —</option>' + options
+    + (mappedId ? '' : '<option value="__new__">＋ Create a new goal account…</option>');
 }
 
 function toggleNewGoalName() {
@@ -156,8 +163,8 @@ function toggleNewGoalName() {
 
 function openGoalModal(tx) {
   goalTransaction = tx;
-  renderGoalAccounts();
-  document.getElementById('goal-account-select').value = '';
+  renderGoalAccounts(tx);
+  document.getElementById('goal-account-select').value = tx.counterpart_account_id || '';
   document.getElementById('goal-new-name').value = '';
   document.getElementById('goal-new-wrap').style.display = 'none';
   document.getElementById('goal-iban-hint').textContent =

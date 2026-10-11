@@ -524,9 +524,16 @@ function checkItem(tx, isIncome) {
     }
   }
 
-  const accountOptions = (state.accounts || [])
-    .filter(a => a.name !== tx.account)
-    .map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const mappedAccountId = tx.counterpart_account_id;
+  let accountOptions = (state.accounts || [])
+    .filter(a => a.name !== tx.account || a.id === mappedAccountId)
+    .map(a => {
+      const match = a.id === mappedAccountId;
+      return `<option value="${a.id}"${match ? ' selected' : ''}>${esc(a.name)}${match ? ' — IBAN match' : ''}</option>`;
+    }).join('');
+  if (mappedAccountId && !(state.accounts || []).some(a => a.id === mappedAccountId)) {
+    accountOptions += `<option value="${mappedAccountId}" selected>${esc(tx.counterpart_account_name)} — IBAN match</option>`;
+  }
   const goalAction = tx.has_iban ? `
     <button type="button" class="m-check-goal-toggle">TRANSFER TO GOAL
       <small>IBAN ••••${esc(tx.iban_last4)}</small>
@@ -536,7 +543,7 @@ function checkItem(tx, isIncome) {
       <select class="m-check-goal-account" aria-label="Goal account">
         <option value="">— choose an account —</option>
         ${accountOptions}
-        <option value="__new__">＋ Create a new goal account…</option>
+        ${mappedAccountId ? '' : '<option value="__new__">＋ Create a new goal account…</option>'}
       </select>
       <div class="m-check-goal-new" hidden>
         <label>New goal name</label>
@@ -596,7 +603,7 @@ function checkItem(tx, isIncome) {
     });
     item.querySelector('.m-check-goal-cancel').addEventListener('click', () => {
       form.hidden = true;
-      accountSelect.value = '';
+      accountSelect.value = mappedAccountId || '';
       newName.value = '';
       newWrap.hidden = true;
     });

@@ -80,6 +80,13 @@ def _insert_account(db, name, account_type='asset', iban=None):
     return cur.lastrowid
 
 
+def _test_iban(serial):
+    """Return a checksum-valid, entirely synthetic Polish IBAN for isolated tests."""
+    bban = f'{serial:024d}'
+    check = 98 - (int(f'{bban}252100') % 97)
+    return f'PL{check:02d}{bban}'
+
+
 # ── unit: helpers ─────────────────────────────────────────────────────────────
 
 def test_parse_flexible_date():
@@ -134,6 +141,55 @@ def test_goal_mapping_existing_account_changes_only_selected_checkme(client, db)
     assert db.execute('SELECT iban FROM accounts WHERE id=?', (aid,)).fetchone()['iban'] == iban
     assert db.execute('SELECT 1 FROM non_goal_ibans WHERE iban=?', (iban,)).fetchone() is None
     assert db.execute('SELECT COUNT(*) FROM corrections').fetchone()[0] == corrections_before
+
+
+def test_unreviewed_names_the_mapped_account_without_exposing_the_full_iban(client, db):
+    iban = _test_iban(401)
+    account_name = 'Stage 3 mapped goal'
+    account_id = _insert_account(db, account_name, iban=iban)
+    _bulk(client, [{
+        'date': '07/10/2032', 'amount': 7, 'account': 'Main account',
+        'category': 'CHECK ME', 'description': 'mapped goal preview',
+        'hash': 'goal-mapped-preview-stage3', 'counterpart_iban': iban,
+    }, {
+        'date': '08/10/2032', 'amount': 8, 'account': 'Main account',
+        'category': 'CHECK ME', 'description': 'unmapped goal preview',
+        'hash': 'goal-unmapped-preview-stage3',
+    }])
+
+    payload = client.get('/api/transactions/unreviewed').get_json()
+    mapped = next(row for row in payload['expenses']
+                  if row['description'] == 'mapped goal preview')
+    unmapped = next(row for row in payload['expenses']
+                    if row['description'] == 'unmapped goal preview')
+    assert mapped['counterpart_account_id'] == account_id
+    assert mapped['counterpart_account_name'] == account_name
+    assert unmapped['counterpart_account_id'] is None
+    assert unmapped['counterpart_account_name'] is None
+    assert iban not in json.dumps(payload)
+
+
+def test_goal_mapping_collision_returns_the_account_name(client, db):
+    iban = _test_iban(402)
+    owner_name = 'Stage 3 collision owner'
+    _insert_account(db, owner_name, iban=iban)
+    candidate_id = _insert_account(db, 'Stage 3 collision candidate')
+    _bulk(client, [{
+        'date': '09/10/2032', 'amount': 9, 'account': 'Main account',
+        'category': 'CHECK ME', 'description': 'mapped goal collision',
+        'hash': 'goal-collision-stage3', 'counterpart_iban': iban,
+    }])
+    tx = db.execute(
+        "SELECT id FROM transactions WHERE source_hash='goal-collision-stage3'"
+    ).fetchone()
+
+    conflict = client.post(
+        f'/api/transactions/{tx["id"]}/goal-transfer',
+        json={'account_id': candidate_id},
+    )
+    assert conflict.status_code == 409
+    assert conflict.get_json()['account_name'] == owner_name
+    assert owner_name in conflict.get_json()['error']
 
 
 def test_goal_mapping_income_can_create_zero_balance_asset_and_be_undone(client, db):
