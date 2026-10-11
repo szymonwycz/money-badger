@@ -192,6 +192,7 @@ def test_resolving_checkme_as_ordinary_remembers_non_goal_iban(client, db, monke
         'date': '04/10/2032', 'amount': 40, 'account': 'Main account',
         'category': 'CHECK ME', 'description': 'ordinary external transfer',
         'hash': 'goal-rejected-stage2', 'counterpart_iban': iban,
+        'goal_discovery_candidate': True,
     }])
     tx = db.execute(
         "SELECT * FROM transactions WHERE source_hash='goal-rejected-stage2'").fetchone()
@@ -221,6 +222,26 @@ def test_resolving_checkme_as_ordinary_remembers_non_goal_iban(client, db, monke
     filed = db.execute('SELECT category_id, tx_type FROM transactions WHERE id=?',
                        (tx['id'],)).fetchone()
     assert filed['category_id'] == category['id'] and filed['tx_type'] == 'Expense'
+
+
+def test_resolving_other_checkme_with_iban_does_not_remember_non_goal(client, db):
+    iban = 'FR1420041010050500013M02606'
+    _bulk(client, [{
+        'date': '05/10/2032', 'amount': 41, 'account': 'Main account',
+        'category': 'CHECK ME', 'description': 'uncertain ordinary payment',
+        'hash': 'non-discovery-checkme', 'counterpart_iban': iban,
+    }])
+    tx = db.execute(
+        "SELECT * FROM transactions WHERE source_hash='non-discovery-checkme'"
+    ).fetchone()
+    category = db.execute(
+        "SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL"
+    ).fetchone()
+
+    assert tx['goal_discovery_candidate'] == 0
+    assert client.put(f'/api/transactions/{tx["id"]}/category',
+                      json={'category_id': category['id']}).status_code == 200
+    assert db.execute('SELECT 1 FROM non_goal_ibans WHERE iban=?', (iban,)).fetchone() is None
 
 
 # ── bulk import ───────────────────────────────────────────────────────────────
@@ -278,6 +299,22 @@ def test_bulk_stores_canonical_full_counterpart_iban(client, db):
     assert row['counterpart_iban'] == 'GB82WEST12345698765432'
 
 
+def test_bulk_goal_discovery_flag_defaults_false_and_stores_true(client, db):
+    _bulk(client, [
+        {'date': '04/03/2030', 'amount': 78, 'account': 'Main account',
+         'category': 'CHECK ME', 'counterpart_iban': 'GB82WEST12345698765432',
+         'hash': 'h-discovery-default'},
+        {'date': '04/03/2030', 'amount': 79, 'account': 'Main account',
+         'category': 'CHECK ME', 'counterpart_iban': 'DE89370400440532013000',
+         'goal_discovery_candidate': True, 'hash': 'h-discovery-true'},
+    ])
+    stored = dict(db.execute(
+        "SELECT source_hash, goal_discovery_candidate FROM transactions "
+        "WHERE source_hash IN ('h-discovery-default', 'h-discovery-true')"
+    ).fetchall())
+    assert stored == {'h-discovery-default': 0, 'h-discovery-true': 1}
+
+
 def test_bulk_invalid_counterpart_iban_becomes_null_without_dropping_batch(client, db):
     rows = [
         {'date': '04/03/2030', 'amount': 79, 'account': 'Main account',
@@ -314,13 +351,13 @@ def test_counterpart_iban_is_not_exposed_by_transaction_endpoints(client):
     assert 'GB82WEST12345698765432' not in export_text
 
 
-def test_push_csv_iban_is_optional_and_does_not_change_hash(tmp_path):
+def test_push_csv_metadata_is_optional_and_does_not_change_hash(tmp_path):
     with_iban = tmp_path / 'with-iban.csv'
     with_iban.write_text(
         'Date;Amount;Account;Amount received;Account (to);Balance;Category;'
         'Description;Transaction Type;Agent;Check #;Class;\n'
         '09/10/2032, 01:00;10.00;Main account;;;;Groceries;Synthetic row;'
-        'Expense;GB82WEST12345698765432;id-1;;\n',
+        'Expense;GB82WEST12345698765432;id-1;goal-discovery;\n',
         encoding='utf-8',
     )
     legacy = tmp_path / 'legacy.csv'
@@ -338,6 +375,8 @@ def test_push_csv_iban_is_optional_and_does_not_change_hash(tmp_path):
         '09/10/2032', 10.0, 'Main account', 'Synthetic row')
     assert current['counterpart_iban'] == 'GB82WEST12345698765432'
     assert old['counterpart_iban'] is None
+    assert current['goal_discovery_candidate'] is True
+    assert old['goal_discovery_candidate'] is False
     assert current['hash'] == old['hash'] == expected
 
 

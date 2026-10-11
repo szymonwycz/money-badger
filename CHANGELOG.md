@@ -37,7 +37,8 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   deposits and withdrawals become title-independent transfers in either direction.
   Full IBAN state is token-only, browser APIs show only the last four digits, false
   discoveries stay dismissed until explicitly allowed again, and mappings can be
-  forgotten without rewriting earlier transactions.
+  forgotten without rewriting earlier transactions. Only rows actually proposed by
+  discovery can create a “not a goal” decision; unrelated CHECK ME rows cannot.
 - **`install.sh` takes several sync times**, comma-separated, and renders one
   `OnCalendar` line per pass — for banks that post incoming transfers in settlement
   sessions rather than on arrival. The prompt suggests a pass a quarter of an hour

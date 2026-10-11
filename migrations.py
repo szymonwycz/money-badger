@@ -359,6 +359,14 @@ def _0012_non_goal_ibans(db):
                       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)''')
 
 
+def _0013_goal_discovery_candidate(db):
+    """Remember which CHECK ME rows were proposed by goal discovery."""
+    columns = {r['name'] for r in db.execute('PRAGMA table_info(transactions)').fetchall()}
+    if 'goal_discovery_candidate' not in columns:
+        db.execute('''ALTER TABLE transactions
+                      ADD COLUMN goal_discovery_candidate INTEGER NOT NULL DEFAULT 0''')
+
+
 MIGRATIONS = [
     ('0001_baseline', _0001_baseline),
     ('0002_indexes', _0002_indexes),
@@ -372,6 +380,7 @@ MIGRATIONS = [
     ('0010_transaction_counterpart_iban', _0010_transaction_counterpart_iban),
     ('0011_unique_account_iban', _0011_unique_account_iban),
     ('0012_non_goal_ibans', _0012_non_goal_ibans),
+    ('0013_goal_discovery_candidate', _0013_goal_discovery_candidate),
 ]
 
 

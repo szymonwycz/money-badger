@@ -54,6 +54,15 @@ def test_full_counterpart_iban_uses_agent_without_changing_csv_shape():
     assert parsed["Check #"] == "iban-id"
 
 
+def test_goal_discovery_candidate_uses_class_without_changing_csv_shape():
+    transaction = bank_tx("candidate-id")
+    transaction["_force_check_me"] = True
+    parsed = list(csv.DictReader(csv_text(transaction).splitlines(), delimiter=";"))[0]
+
+    assert parsed["Class"] == "goal-discovery"
+    assert parsed["Check #"] == "candidate-id"
+
+
 def test_counterpart_iban_does_not_change_check_number_deduplication(tmp_path):
     path = tmp_path / "daily.csv"
     first = bank_tx("same-id")

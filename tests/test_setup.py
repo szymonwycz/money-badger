@@ -95,6 +95,39 @@ def test_non_goal_iban_migration_creates_decision_table(tmp_path):
     conn.close()
 
 
+def test_goal_discovery_candidate_migration_defaults_existing_rows_false(tmp_path):
+    path = tmp_path / 'goal-candidate.db'
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute('''CREATE TABLE schema_migrations (
+                        name TEXT PRIMARY KEY,
+                        applied_at TEXT NOT NULL)''')
+    conn.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY)')
+    conn.execute('INSERT INTO transactions DEFAULT VALUES')
+    conn.executemany(
+        'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
+        [(name, '2032-10-09') for name, _fn in migrations.MIGRATIONS
+         if name < '0013_goal_discovery_candidate'],
+    )
+    conn.commit()
+    conn.close()
+
+    migrations.migrate(path)
+    migrations.migrate(path)
+
+    conn = sqlite3.connect(path)
+    value = conn.execute(
+        'SELECT goal_discovery_candidate FROM transactions WHERE id=1'
+    ).fetchone()[0]
+    applied = conn.execute(
+        "SELECT COUNT(*) FROM schema_migrations "
+        "WHERE name='0013_goal_discovery_candidate'"
+    ).fetchone()[0]
+    conn.close()
+    assert value == 0
+    assert applied == 1
+
+
 def test_pages_redirect_to_setup_before_it_is_done(client):
     res = client.get('/')
     assert res.status_code == 302

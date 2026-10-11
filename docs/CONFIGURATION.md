@@ -210,9 +210,11 @@ and select an existing account, or create a new asset account at balance zero.
 Afterwards debits to that IBAN are transfers into the asset and credits from it are
 transfers back to the current account, regardless of title.
 
-Filing the candidate as an ordinary category or ignoring it records that IBAN as
-“not a goal”, so the same false positive does not keep returning. CHECK ME lists
-those decisions under **GOAL DISCOVERY**, where **ALLOW AGAIN** removes the decision.
+Filing a row explicitly proposed by goal discovery as an ordinary category, or
+ignoring it, records that IBAN as “not a goal”, so the same false positive does not
+keep returning. Other CHECK ME rows do not create that decision merely because they
+carry a counterparty IBAN. CHECK ME lists those decisions under **GOAL DISCOVERY**,
+where **ALLOW AGAIN** removes the decision.
 The accounts UI can likewise forget a positive mapping; neither action rewrites
 transactions already filed.
 

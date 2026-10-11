@@ -665,7 +665,7 @@ def generate_money_pro_csv(transactions: list, account_name: str, account_names:
         lines.append(_money_pro_csv_line([
             dt_fmt, amt_str, row_account, amount_recv, account_to, "",
             category, full_desc, tx_type, tx.get("_counterpart_iban_full", ""),
-            check_number, "", "",
+            check_number, "goal-discovery" if tx.get("_force_check_me") else "", "",
         ]))
 
     return "\n".join(lines)

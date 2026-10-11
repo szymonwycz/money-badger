@@ -391,7 +391,8 @@ def require_api_token():
 
 def remember_non_goal_iban(db, tx):
     """Persist an ordinary CHECK ME decision so discovery does not repeat it."""
-    if (tx['counterpart_iban'] and tx['category_id'] is None
+    if (tx['goal_discovery_candidate'] and tx['counterpart_iban']
+            and tx['category_id'] is None
             and tx['income_category_id'] is None and not tx['ignored']
             and tx['tx_type'] in ('Expense', 'Income')):
         db.execute('INSERT OR IGNORE INTO non_goal_ibans (iban) VALUES (?)',
@@ -1079,18 +1080,23 @@ def bulk_transactions():
                 counterpart_iban = None
                 app.logger.warning(
                     'bulk import: invalid counterparty IBAN stored as NULL: %s', exc)
+            goal_discovery_candidate = 1 if (
+                tx.get('goal_discovery_candidate') is True
+                or tx.get('goal_discovery_candidate') == 1
+            ) else 0
 
             cur = db.execute(
                 '''INSERT OR IGNORE INTO transactions
                    (date, amount, account, account_to, tx_type, description,
                     category_id, income_category_id, month, year, source_hash,
-                    counterpart_iban)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    counterpart_iban, goal_discovery_candidate)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (dt.strftime('%Y-%m-%d'), amount,
                  tx.get('account', ''), tx.get('account_to', ''),
                  row_type,
                  tx.get('description', ''), cat_id, income_cat_id,
-                 dt.month, dt.year, tx.get('hash'), counterpart_iban)
+                 dt.month, dt.year, tx.get('hash'), counterpart_iban,
+                 goal_discovery_candidate)
             )
             if cur.rowcount and income_cat_id is not None:
                 bump_income_received(db, income_cat_id, dt.month, dt.year, amount)
