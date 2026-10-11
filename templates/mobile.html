@@ -136,18 +136,75 @@
 
   <!-- BUDGET -->
   <section class="m-panel" id="panel-budget">
-    <div class="m-month-nav">
-      <button id="m-prev">‹</button>
-      <span id="m-month-label"></span>
-      <button id="m-next">›</button>
+    <div id="m-budget-overview">
+      <div class="m-month-nav">
+        <button id="m-prev">‹</button>
+        <span id="m-month-label"></span>
+        <button id="m-next">›</button>
+      </div>
+      <div class="m-sum">
+        <div class="cell"><span class="lbl">INCOME</span><span class="num" id="m-sum-income">—</span></div>
+        <div class="cell"><span class="lbl">PLANNED</span><span class="num" id="m-sum-planned">—</span></div>
+        <div class="cell"><span class="lbl">SPENT</span><span class="num" id="m-sum-spent">—</span></div>
+        <div class="cell"><span class="lbl">LEFT</span><span class="num" id="m-sum-left">—</span></div>
+      </div>
+      <div id="m-cat-list"></div>
     </div>
-    <div class="m-sum">
-      <div class="cell"><span class="lbl">INCOME</span><span class="num" id="m-sum-income">—</span></div>
-      <div class="cell"><span class="lbl">PLANNED</span><span class="num" id="m-sum-planned">—</span></div>
-      <div class="cell"><span class="lbl">SPENT</span><span class="num" id="m-sum-spent">—</span></div>
-      <div class="cell"><span class="lbl">LEFT</span><span class="num" id="m-sum-left">—</span></div>
+
+    <div class="m-budget-editor" id="m-budget-editor" hidden>
+      <div class="m-budget-editor-header">
+        <button type="button" class="back" id="m-budget-back">‹ Back</button>
+        <div class="m-budget-editor-heading">
+          <span class="eyebrow" id="m-budget-editor-month"></span>
+          <h2 id="m-budget-editor-title"></h2>
+        </div>
+      </div>
+
+      <section class="m-budget-card m-budget-basic-card">
+        <div class="m-budget-section-heading">
+          <span>BASIC</span>
+          <small>Monthly base amount</small>
+        </div>
+        <div class="m-budget-basic-row">
+          <div class="m-budget-money-input">
+            <input type="text" inputmode="decimal" id="m-budget-basic-amount"
+                   aria-label="Basic budget amount" autocomplete="off">
+            <span>{{ settings.currency }}</span>
+          </div>
+          <button type="button" id="m-budget-basic-save">SAVE BASIC</button>
+        </div>
+        <div class="m-budget-message" id="m-budget-basic-message" role="status"></div>
+      </section>
+
+      <section class="m-budget-card">
+        <div class="m-budget-section-heading">
+          <span>ADDITIONAL</span>
+          <small>One-off amounts this month</small>
+        </div>
+        <div id="m-budget-additional-list"></div>
+        <div class="m-budget-additional-form">
+          <div class="m-field">
+            <label for="m-budget-additional-amount">AMOUNT</label>
+            <input type="text" inputmode="decimal" id="m-budget-additional-amount"
+                   placeholder="0" autocomplete="off">
+          </div>
+          <div class="m-field">
+            <label for="m-budget-additional-note">NOTE</label>
+            <input type="text" id="m-budget-additional-note" placeholder="Optional">
+          </div>
+          <button type="button" id="m-budget-additional-add">ADD AMOUNT</button>
+        </div>
+        <div class="m-budget-message" id="m-budget-additional-message" role="status"></div>
+      </section>
+
+      <section class="m-budget-card">
+        <div class="m-budget-section-heading">
+          <span>TRANSACTIONS</span>
+          <small>This category, this month</small>
+        </div>
+        <div id="m-budget-transaction-list"></div>
+      </section>
     </div>
-    <div id="m-cat-list"></div>
   </section>
 
   <section class="m-panel" id="panel-check">

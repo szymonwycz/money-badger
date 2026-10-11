@@ -30,6 +30,9 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   `flock` on `.master_pi.lock` makes the second run exit quietly with status 0.
 
 ### Added
+- **The mobile BUDGET tab can edit a category in place.** It saves BASIC with stale-write
+  protection, adds or removes one-off amounts, shows the month's matching transactions,
+  and keeps safe ADDITIONAL writes in the offline queue.
 - **Savings goals and subaccounts with distinct IBANs can be learned from CHECK ME.**
   The import keeps a validated counterparty IBAN without changing transaction hashes;
   bank-specific phrases or an account-holder match can propose an unknown IBAN, and

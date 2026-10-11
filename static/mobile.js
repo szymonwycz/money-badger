@@ -8,6 +8,7 @@ const state = {
   expanded: new Set(),
   txFilterCategoryId: null,
   check: { expenses: [], income: [] },
+  budgetEditor: null,
 };
 
 // ── offline write queue ──────────────────────────────────────────────────────
@@ -16,10 +17,9 @@ const state = {
 // is enough: whoever's back online first just replays their own writes, no
 // merging needed. A write the server actually rejects (validation error, not
 // a network failure) is dropped after one attempt rather than retried forever.
-// EXCEPTIONS: account balance corrections and goal-IBAN decisions (below,
-// `noQueue: true`) are NOT queued. Both depend on current server state, so a
-// delayed replay could compute the wrong diff or apply a stale mapping. They
-// fail fast and tell the user to reconnect instead.
+// EXCEPTIONS: account balance corrections, goal-IBAN decisions and BASIC budget
+// edits (`noQueue: true`) are NOT queued. They depend on current server state, so
+// a delayed replay could apply a stale decision or silently overwrite newer work.
 const QUEUE_KEY  = 'mb-offline-queue';
 const FAILED_KEY = 'mb-failed-writes';
 
@@ -109,7 +109,12 @@ async function flushQueue() {
   } finally {
     flushing = false;
   }
-  loadAccounts(); loadBudget().then(() => { if (document.getElementById('panel-budget').classList.contains('active')) loadBudgetTab(); });
+  loadAccounts();
+  if (document.getElementById('panel-budget').classList.contains('active')) {
+    loadBudgetTab({ keepEditor: true });
+  } else {
+    loadBudget();
+  }
   if (document.getElementById('panel-txns').classList.contains('active')) loadTxTab();
 }
 window.addEventListener('online', flushQueue);
@@ -132,7 +137,7 @@ function api(url, opts) {
       if (!r.ok || (body && body.error)) {
         const msg = (body && body.error) || `Server error (${r.status})`;
         toast(msg, 'error');
-        return { error: msg };
+        return { ...(body || {}), error: msg, status: r.status };
       }
       return body;
     })
@@ -152,7 +157,10 @@ document.querySelectorAll('.m-tab').forEach(tab => {
     tab.classList.add('active');
     document.getElementById(tab.dataset.panel).classList.add('active');
     if (tab.dataset.panel === 'panel-balances') loadAccounts();
-    if (tab.dataset.panel === 'panel-budget') loadBudgetTab();
+    if (tab.dataset.panel === 'panel-budget') {
+      closeBudgetEditor();
+      loadBudgetTab();
+    }
     if (tab.dataset.panel === 'panel-txns') { clearTxFilter(); loadTxTab(); }
     if (tab.dataset.panel === 'panel-check') loadCheckTab();
   });
@@ -826,6 +834,15 @@ function catSpent(id) {
   return Math.abs(state.budget.spent[id] || 0);
 }
 
+function budgetCategory(id) {
+  for (const group of state.categories) {
+    if (group.id === id) return group;
+    const child = group.children.find(c => c.id === id);
+    if (child) return child;
+  }
+  return null;
+}
+
 function renderBudget() {
   document.getElementById('m-month-label').textContent =
     `${MONTHS[state.month-1].toUpperCase()} ${state.year}`;
@@ -840,8 +857,6 @@ function renderBudget() {
     for (const c of leaves) { gTotal += catTotal(c); gSpent += catSpent(c.id); }
     if (g.children.length) gSpent += catSpent(g.id);
     totalPlanned += gTotal; totalSpent += gSpent;
-
-    if (gTotal === 0 && gSpent === 0) continue;  // hide empty categories on mobile
 
     const rem  = gTotal - gSpent;
     const pct  = gTotal > 0 ? Math.min(100, Math.round(gSpent / gTotal * 100)) : 100;
@@ -858,22 +873,22 @@ function renderBudget() {
       <div class="m-cat-sub">${fmtNum(gSpent)} of ${fmtNum(gTotal)}</div>
       ${g.children.length ? `<div class="m-cat-children">${g.children.map(c => {
         const t = catTotal(c), s = catSpent(c.id);
-        if (t === 0 && s === 0) return '';
         const r = t - s;
         return `<div class="m-cat-child" data-catid="${c.id}" data-catname="${esc(c.name)}"><span>${esc(c.name)}</span>
                 <span style="color:${r < 0 ? 'var(--red)' : 'var(--text2)'}">${fmtNum(r)}</span></div>`;
       }).join('')}</div>` : ''}
     `;
-    // leaf categories (no children) drill down straight to their own transactions;
-    // parent categories toggle open first — the child rows drill down from there
+    // Parent categories disclose their leaves; leaf rows open the in-flow editor.
+    // Empty leaves stay visible now, otherwise there would be no way to give one
+    // its first BASIC or ADDITIONAL amount from a phone.
     if (g.children.length) {
       div.addEventListener('click', e => {
         const child = e.target.closest('.m-cat-child');
-        if (child) { e.stopPropagation(); openCategoryTx(parseInt(child.dataset.catid), child.dataset.catname); return; }
+        if (child) { e.stopPropagation(); openBudgetEditor(parseInt(child.dataset.catid), child.dataset.catname); return; }
         div.classList.toggle('expanded');
       });
     } else {
-      div.addEventListener('click', () => openCategoryTx(g.id, g.name));
+      div.addEventListener('click', () => openBudgetEditor(g.id, g.name));
     }
     list.appendChild(div);
   }
@@ -888,9 +903,243 @@ function renderBudget() {
   leftEl.style.color = left < 0 ? 'var(--red)' : 'var(--green)';
 }
 
-async function loadBudgetTab() {
+function setBudgetMessage(id, text, kind = '') {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = `m-budget-message${kind ? ` ${kind}` : ''}`;
+}
+
+function closeBudgetEditor() {
+  document.getElementById('m-budget-editor').hidden = true;
+  document.getElementById('m-budget-overview').hidden = false;
+  state.budgetEditor = null;
+}
+
+async function openBudgetEditor(categoryId, categoryName) {
+  const cat = budgetCategory(categoryId);
+  if (!cat) return;
+  state.budgetEditor = {
+    categoryId,
+    categoryName,
+    expectedBasic: Number(cat.basic || 0),
+  };
+  document.getElementById('m-budget-overview').hidden = true;
+  document.getElementById('m-budget-editor').hidden = false;
+  document.querySelector('.m-content').scrollTop = 0;
+  await renderBudgetEditor();
+}
+
+function renderBudgetAdditionals() {
+  const editor = state.budgetEditor;
+  if (!editor) return;
+  const list = document.getElementById('m-budget-additional-list');
+  const rows = state.budget.additionals[editor.categoryId] || [];
+  list.innerHTML = '';
+  if (!rows.length) {
+    list.innerHTML = '<div class="m-budget-empty">No additional amounts.</div>';
+    return;
+  }
+
+  for (const additional of rows) {
+    const row = document.createElement('div');
+    row.className = 'm-budget-additional-row';
+    row.dataset.additionalId = additional.id || '';
+    row.innerHTML = `
+      <div class="m-budget-additional-copy">
+        <div class="m-budget-additional-amount">${fmtNum(additional.amount)}</div>
+        <div class="m-budget-additional-note">${esc(additional.description || (additional._queued ? 'Queued for sync' : '—'))}</div>
+      </div>
+      ${additional._queued
+        ? '<span class="m-budget-additional-note">QUEUED</span>'
+        : '<button type="button" class="m-budget-additional-delete" aria-label="Delete additional amount">×</button>'}
+    `;
+    const del = row.querySelector('.m-budget-additional-delete');
+    if (del) del.addEventListener('click', () => deleteBudgetAdditional(additional));
+    list.appendChild(row);
+  }
+}
+
+async function renderBudgetTransactions(categoryId) {
+  const list = document.getElementById('m-budget-transaction-list');
+  list.innerHTML = '<div class="m-budget-empty">Loading transactions…</div>';
+  let txs;
+  try {
+    txs = await api(`/api/transactions?month=${state.month}&year=${state.year}&category_id=${categoryId}`);
+  } catch {
+    if (state.budgetEditor?.categoryId === categoryId) {
+      list.innerHTML = '<div class="m-budget-empty">Transactions are unavailable offline.</div>';
+    }
+    return;
+  }
+  if (state.budgetEditor?.categoryId !== categoryId) return;
+  list.innerHTML = '';
+  if (!txs.length) {
+    list.innerHTML = '<div class="m-budget-empty">No transactions in this category.</div>';
+    return;
+  }
+  for (const tx of txs) {
+    const row = document.createElement('div');
+    row.className = 'm-budget-transaction-row';
+    row.innerHTML = `
+      <span class="m-budget-transaction-date">${fmtDayMonth(tx.date)}</span>
+      <div class="m-budget-transaction-copy">
+        <div class="m-budget-transaction-desc">${esc(fmtDesc(tx.description) || tx.account || '—')}</div>
+      </div>
+      <span class="m-budget-transaction-amount" style="color:${txColor(tx)}">${fmtNum(Math.abs(tx.amount))}</span>
+    `;
+    list.appendChild(row);
+  }
+}
+
+async function renderBudgetEditor() {
+  const editor = state.budgetEditor;
+  if (!editor) return;
+  document.getElementById('m-budget-editor-month').textContent =
+    `${MONTHS[state.month - 1].toUpperCase()} ${state.year}`;
+  document.getElementById('m-budget-editor-title').textContent = editor.categoryName;
+  document.getElementById('m-budget-basic-amount').value = fmtAmountInput(editor.expectedBasic);
+  setBudgetMessage('m-budget-basic-message', '');
+  setBudgetMessage('m-budget-additional-message', '');
+  renderBudgetAdditionals();
+  await renderBudgetTransactions(editor.categoryId);
+}
+
+async function loadBudgetTab({ keepEditor = false } = {}) {
+  const openEditor = keepEditor ? state.budgetEditor : null;
   await Promise.all([loadCategories(), loadBudget()]);
   renderBudget();
+  if (!openEditor) {
+    closeBudgetEditor();
+    return;
+  }
+  const cat = budgetCategory(openEditor.categoryId);
+  if (!cat) {
+    closeBudgetEditor();
+    return;
+  }
+  state.budgetEditor = {
+    ...openEditor,
+    categoryName: cat.name,
+    expectedBasic: Number(cat.basic || 0),
+  };
+  document.getElementById('m-budget-overview').hidden = true;
+  document.getElementById('m-budget-editor').hidden = false;
+  await renderBudgetEditor();
+}
+
+document.getElementById('m-budget-back').addEventListener('click', closeBudgetEditor);
+
+document.getElementById('m-budget-basic-save').addEventListener('click', async () => {
+  const editor = state.budgetEditor;
+  if (!editor) return;
+  const input = document.getElementById('m-budget-basic-amount');
+  const button = document.getElementById('m-budget-basic-save');
+  const amount = Number(String(input.value).replace(',', '.'));
+  if (!Number.isFinite(amount) || amount < 0) {
+    setBudgetMessage('m-budget-basic-message', 'Enter an amount of 0 or more.', 'error');
+    return;
+  }
+
+  button.disabled = true;
+  const res = await api('/api/basic', {
+    method: 'POST',
+    body: JSON.stringify({
+      category_id: editor.categoryId,
+      amount,
+      expected_amount: editor.expectedBasic,
+      month: state.month,
+      year: state.year,
+    }),
+    noQueue: true,
+  });
+  button.disabled = false;
+
+  if (res?.error === 'offline') {
+    setBudgetMessage(
+      'm-budget-basic-message',
+      'No connection — BASIC was not saved or queued. Reconnect and try again.',
+      'error');
+    return;
+  }
+  if (res?.status === 409 && Object.prototype.hasOwnProperty.call(res, 'current_amount')) {
+    editor.expectedBasic = Number(res.current_amount || 0);
+    setBudgetMessage(
+      'm-budget-basic-message',
+      `BASIC changed on another phone. Current value: ${fmtNum(res.current_amount)}. ` +
+      'Review your amount, then tap SAVE BASIC again to replace it.',
+      'error');
+    return;
+  }
+  if (res?.error) {
+    setBudgetMessage('m-budget-basic-message', 'BASIC was not saved. Try again.', 'error');
+    return;
+  }
+
+  await loadBudgetTab({ keepEditor: true });
+  setBudgetMessage('m-budget-basic-message', 'BASIC saved.', 'success');
+});
+
+document.getElementById('m-budget-additional-add').addEventListener('click', async () => {
+  const editor = state.budgetEditor;
+  if (!editor) return;
+  const amountInput = document.getElementById('m-budget-additional-amount');
+  const noteInput = document.getElementById('m-budget-additional-note');
+  const button = document.getElementById('m-budget-additional-add');
+  const amount = Number(String(amountInput.value).replace(',', '.'));
+  const description = noteInput.value.trim();
+  if (!Number.isFinite(amount) || amount <= 0) {
+    setBudgetMessage('m-budget-additional-message', 'Enter an amount greater than 0.', 'error');
+    return;
+  }
+
+  button.disabled = true;
+  const res = await api('/api/additional', {
+    method: 'POST',
+    body: JSON.stringify({
+      category_id: editor.categoryId,
+      amount,
+      description,
+      month: state.month,
+      year: state.year,
+    }),
+  });
+  button.disabled = false;
+  if (res?.error) {
+    setBudgetMessage('m-budget-additional-message', 'Additional amount was not saved.', 'error');
+    return;
+  }
+
+  amountInput.value = '';
+  noteInput.value = '';
+  if (res.queued) {
+    const rows = state.budget.additionals[editor.categoryId] || [];
+    rows.push({ amount, description, _queued: true });
+    state.budget.additionals[editor.categoryId] = rows;
+    renderBudgetAdditionals();
+    setBudgetMessage('m-budget-additional-message', 'Queued — will sync when online.', 'pending');
+    return;
+  }
+  await loadBudgetTab({ keepEditor: true });
+  setBudgetMessage('m-budget-additional-message', 'Additional amount saved.', 'success');
+});
+
+async function deleteBudgetAdditional(additional) {
+  if (!state.budgetEditor || !confirm(`Delete this additional amount (${fmtNum(additional.amount)})?`)) return;
+  const categoryId = state.budgetEditor.categoryId;
+  const res = await api(`/api/additional/${additional.id}`, { method: 'DELETE' });
+  if (res?.error) {
+    setBudgetMessage('m-budget-additional-message', 'Additional amount was not deleted.', 'error');
+    return;
+  }
+  if (res.queued) {
+    state.budget.additionals[categoryId] =
+      (state.budget.additionals[categoryId] || []).filter(row => row.id !== additional.id);
+    renderBudgetAdditionals();
+    setBudgetMessage('m-budget-additional-message', 'Deletion queued — will sync when online.', 'pending');
+    return;
+  }
+  await loadBudgetTab({ keepEditor: true });
+  setBudgetMessage('m-budget-additional-message', 'Additional amount deleted.', 'success');
 }
 
 document.getElementById('m-prev').addEventListener('click', () => {

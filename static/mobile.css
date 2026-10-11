@@ -136,6 +136,75 @@ button, input, select, textarea, .m-queue-badge {
 .m-cat-child > span:last-child { white-space: nowrap; flex-shrink: 0; }
 .m-cat-child:active { opacity: 0.6; }
 
+/* Budget editing stays in the document flow. Fixed sheets drift under the iOS
+   keyboard, and a monthly plan benefits from keeping its category as the header. */
+.m-budget-editor[hidden] { display: none; }
+.m-budget-editor-header { display: flex; align-items: flex-start; gap: var(--space-md); margin-bottom: var(--space-lg); }
+.m-budget-editor-header .back {
+  flex-shrink: 0; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-md); color: var(--text); font-size: var(--fs-lg); padding: var(--space-sm) var(--space-md);
+}
+.m-budget-editor-heading { min-width: 0; padding-top: var(--space-xs); }
+.m-budget-editor-heading .eyebrow {
+  display: block; color: var(--text2); font-size: var(--fs-xs); letter-spacing: 1px; margin-bottom: var(--space-xs);
+}
+.m-budget-editor-heading h2 { font-size: var(--fs-xl); line-height: 1.2; overflow-wrap: anywhere; }
+.m-budget-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-control);
+  padding: var(--space-lg); margin-bottom: var(--space-md);
+}
+.m-budget-basic-card { border-top: 2px solid var(--yellow); }
+.m-budget-section-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-sm); margin-bottom: var(--space-md);
+}
+.m-budget-section-heading > span { color: var(--text); font-size: var(--fs-caption); font-weight: 700; letter-spacing: 1px; }
+.m-budget-section-heading small { color: var(--text2); font-size: var(--fs-caption); text-align: right; }
+.m-budget-basic-row { display: flex; align-items: stretch; gap: var(--space-sm); }
+.m-budget-money-input {
+  display: flex; align-items: center; flex: 1; min-width: 0;
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.m-budget-money-input input {
+  width: 100%; min-width: 0; background: transparent; border: 0; outline: none;
+  color: var(--yellow); font-size: var(--fs-input); font-weight: 700; text-align: right; padding: 0 var(--space-sm);
+}
+.m-budget-money-input span {
+  color: var(--text2); font-size: var(--fs-base); padding-right: var(--space-sm); white-space: nowrap; flex-shrink: 0;
+}
+.m-budget-basic-row button, .m-budget-additional-form > button {
+  background: var(--yellow); color: var(--bg); border: 0; border-radius: var(--radius-md);
+  font-size: var(--fs-caption); font-weight: 700; letter-spacing: 0.5px; padding: 0 var(--space-md);
+}
+.m-budget-basic-row button:disabled, .m-budget-additional-form > button:disabled { opacity: 0.5; }
+.m-budget-message {
+  min-height: 18px; margin-top: var(--space-sm); color: var(--text2); font-size: var(--fs-caption); line-height: 1.4;
+}
+.m-budget-message.success { color: var(--green); }
+.m-budget-message.pending { color: var(--yellow); }
+.m-budget-message.error { color: var(--red); }
+.m-budget-additional-row, .m-budget-transaction-row {
+  display: flex; align-items: center; gap: var(--space-sm); min-height: var(--tap-min);
+  border-top: 1px solid var(--border); padding: var(--space-sm) 0;
+}
+.m-budget-additional-row:first-child, .m-budget-transaction-row:first-child { border-top: 0; }
+.m-budget-additional-copy, .m-budget-transaction-copy { flex: 1; min-width: 0; }
+.m-budget-additional-note, .m-budget-transaction-desc {
+  color: var(--text2); font-size: var(--fs-caption); overflow-wrap: anywhere;
+}
+.m-budget-additional-amount, .m-budget-transaction-amount { font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+.m-budget-additional-delete {
+  flex-shrink: 0; background: transparent; border: 1px solid var(--border);
+  border-radius: var(--radius-md); color: var(--red); font-size: var(--fs-icon);
+}
+.m-budget-additional-form {
+  display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: var(--space-sm);
+  border-top: 1px solid var(--border); margin-top: var(--space-sm); padding-top: var(--space-md);
+}
+.m-budget-additional-form .m-field { margin-bottom: 0; }
+.m-budget-additional-form > button { grid-column: 1 / -1; width: 100%; }
+.m-budget-empty { color: var(--text2); font-size: var(--fs-base); padding: var(--space-sm) 0; }
+.m-budget-transaction-date { color: var(--text2); font-size: var(--fs-caption); white-space: nowrap; flex-shrink: 0; }
+
 /* CHECK ME tab */
 .m-tab-badge {
   position: absolute; top: var(--space-xs); right: 50%; transform: translateX(22px);

@@ -19,6 +19,7 @@ global.document = {
   addEventListener: () => {},
 };
 global.window = { addEventListener: () => {} };
+global.toast = () => {};
 
 let fetchCalls = [];
 let fetchBehavior = () => { throw new Error('offline'); };
@@ -32,6 +33,7 @@ global.fetch = (url, opts) => {
 // Stub out functions flushQueue calls at the end that aren't under test here.
 global.loadAccounts = () => {};
 global.loadBudget = () => Promise.resolve();
+global.loadBudgetTab = () => Promise.resolve();
 global.loadTxTab = () => {};
 
 // Pull out the queue block plus api() rather than eval-ing the whole file, which has
@@ -84,20 +86,70 @@ const failed = JSON.parse(store['mb-failed-writes'] || '[]');
 assert.equal(failed.length, 1, 'a rejected write should be recorded as failed');
 assert.equal(failed[0].reason, 'Unknown category');
 
-// 6. noQueue: true (balance correction) fails fast offline instead of queuing —
-// it's a diff-against-live-state write, unsafe to replay after a delay with a
-// second person's transactions in between.
+// 6. noQueue: true writes fail fast offline instead of queuing. Balance
+// corrections and BASIC compare against live state, so a late replay is unsafe.
 fetchBehavior = () => { throw new Error('offline'); };
 const balanceRes = await api('/api/accounts/7', { method: 'PUT', body: '{"balance":520}', noQueue: true });
 assert.deepEqual(balanceRes, { error: 'offline' });
 assert.equal(loadQueue().length, 0, 'a noQueue write must never land in the queue');
 
+const basicRes = await api('/api/basic', {
+  method: 'POST',
+  body: '{"category_id":12,"amount":800,"expected_amount":700,"month":10,"year":2030}',
+  noQueue: true,
+});
+assert.deepEqual(basicRes, { error: 'offline' });
+assert.equal(loadQueue().length, 0, 'offline BASIC must not be queued');
+
+fetchBehavior = () => Promise.resolve({
+  ok: false,
+  status: 409,
+  json: () => Promise.resolve({
+    error: 'BASIC changed since it was loaded.',
+    current_amount: 725,
+  }),
+});
+const conflictRes = await api('/api/basic', {
+  method: 'POST', body: '{"amount":800,"expected_amount":700}', noQueue: true,
+});
+assert.deepEqual(conflictRes, {
+  error: 'BASIC changed since it was loaded.', current_amount: 725, status: 409,
+});
+assert.equal(loadQueue().length, 0, 'a BASIC conflict must not be queued');
+
 // Goal mapping depends on the current server-side IBAN decisions and account list.
 // Replaying it later could target an account that was renamed, removed or remapped.
+fetchBehavior = () => { throw new Error('offline'); };
 const goalRes = await api('/api/transactions/42/goal-transfer', {
   method: 'POST', body: '{"account_id":7}', noQueue: true,
 });
 assert.deepEqual(goalRes, { error: 'offline' });
 assert.equal(loadQueue().length, 0, 'offline goal mapping must not be queued');
+
+// 7. ADDITIONAL changes are safe delayed writes. POST and DELETE both queue,
+// retain their order, and replay FIFO when the phone reconnects.
+const additionalPost = await api('/api/additional', {
+  method: 'POST',
+  body: '{"category_id":12,"amount":125,"description":"Shoes","month":10,"year":2030}',
+});
+const additionalDelete = await api('/api/additional/44', { method: 'DELETE' });
+assert.equal(additionalPost.queued, true);
+assert.equal(additionalDelete.queued, true);
+assert.deepEqual(loadQueue().map(item => [item.method, item.url]), [
+  ['POST', '/api/additional'],
+  ['DELETE', '/api/additional/44'],
+]);
+
+fetchCalls = [];
+fetchBehavior = (url, opts) => {
+  fetchCalls.push({ url, opts });
+  return Promise.resolve({ ok: true });
+};
+await flushQueue();
+assert.equal(loadQueue().length, 0);
+assert.deepEqual(fetchCalls.map(call => [call.opts.method, call.url]), [
+  ['POST', '/api/additional'],
+  ['DELETE', '/api/additional/44'],
+]);
 
 console.log('OK — all offline queue tests passed');
