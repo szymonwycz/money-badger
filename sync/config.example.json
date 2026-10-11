@@ -9,7 +9,7 @@
     "00000000000000000000000001": "Main account",
     "00000000000000000000000002": "Partner account"
   },
-  "_comment_account_holders": "Optional full names that appear in bank descriptions. Learn rejects a rule whose entire key is only one of these names; longer phrases remain allowed.",
+  "_comment_account_holders": "Optional full names that appear in bank descriptions. Besides protecting learned rules, a matching counterparty name can flag a transfer to an unknown goal IBAN for review.",
   "account_holders": ["Alex Example", "Sam Example"],
   "own_ibans": [
     "00000000000000000000000001",
@@ -29,6 +29,9 @@
     ],
 
     "savings_withdrawal_titles": [],
+
+    "_comment_goal_transfers": "Optional bank-specific phrases used only to discover an unknown goal or subaccount IBAN. Once mapped, that IBAN is recognized without a phrase.",
+    "goal_transfer_titles": [],
 
     "_comment_skip_incoming": "Card top-ups book both legs without an IBAN, days apart. Keep only the outgoing leg or the money is counted twice.",
     "skip_incoming_titles": ["top-up"]

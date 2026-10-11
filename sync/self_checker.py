@@ -173,8 +173,9 @@ def check_orphan_raw_pulls(cfg: dict) -> list[str]:
             if len(nonzero) < 2:
                 continue
             count = con.execute(
-                "SELECT COUNT(*) FROM transactions WHERE account=? AND date BETWEEN ? AND ?",
-                (name, date_from, date_to),
+                """SELECT COUNT(*) FROM transactions
+                   WHERE (account=? OR account_to=?) AND date BETWEEN ? AND ?""",
+                (name, name, date_from, date_to),
             ).fetchone()[0]
             if count == 0:
                 findings.append(

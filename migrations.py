@@ -345,6 +345,20 @@ def _0010_transaction_counterpart_iban(db):
         db.execute('ALTER TABLE transactions ADD COLUMN counterpart_iban TEXT')
 
 
+def _0011_unique_account_iban(db):
+    """One bank account identifier can belong to at most one budget account."""
+    db.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_iban_unique
+                  ON accounts(iban)
+                  WHERE iban IS NOT NULL AND iban != '' ''')
+
+
+def _0012_non_goal_ibans(db):
+    """Remember counterparty IBANs the user reviewed as ordinary transactions."""
+    db.execute('''CREATE TABLE IF NOT EXISTS non_goal_ibans (
+                      iban TEXT PRIMARY KEY,
+                      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)''')
+
+
 MIGRATIONS = [
     ('0001_baseline', _0001_baseline),
     ('0002_indexes', _0002_indexes),
@@ -356,6 +370,8 @@ MIGRATIONS = [
     ('0008_drop_lot_tables', _0008_drop_lot_tables),
     ('0009_users', _0009_users),
     ('0010_transaction_counterpart_iban', _0010_transaction_counterpart_iban),
+    ('0011_unique_account_iban', _0011_unique_account_iban),
+    ('0012_non_goal_ibans', _0012_non_goal_ibans),
 ]
 
 

@@ -300,9 +300,18 @@ class BadInput(Exception):
     """Raised by the parse_* helpers; turned into a 400 by the error handler below."""
 
 
+class Conflict(Exception):
+    """The request is valid, but conflicts with the current ledger state."""
+
+
 @app.errorhandler(BadInput)
 def handle_bad_input(e):
     return jsonify({'error': str(e)}), 400
+
+
+@app.errorhandler(Conflict)
+def handle_conflict(e):
+    return jsonify({'error': str(e)}), 409
 
 
 @app.errorhandler(sqlite3.IntegrityError)
@@ -370,6 +379,23 @@ def normalize_iban(value, field='iban'):
     if int(digits) % 97 != 1:
         raise BadInput(f'{field} has an invalid checksum')
     return iban
+
+
+def require_api_token():
+    """Protect machine-only data even when browser login is disabled or active."""
+    supplied = request.headers.get('X-MB-Token', '')
+    if not API_TOKEN or not secrets.compare_digest(supplied, API_TOKEN):
+        return jsonify({'error': 'API token required'}), 401
+    return None
+
+
+def remember_non_goal_iban(db, tx):
+    """Persist an ordinary CHECK ME decision so discovery does not repeat it."""
+    if (tx['counterpart_iban'] and tx['category_id'] is None
+            and tx['income_category_id'] is None and not tx['ignored']
+            and tx['tx_type'] in ('Expense', 'Income')):
+        db.execute('INSERT OR IGNORE INTO non_goal_ibans (iban) VALUES (?)',
+                   (tx['counterpart_iban'],))
 
 
 def month_year_args():
@@ -1146,6 +1172,7 @@ def update_transaction(tid):
         old_cat = tx['category_id']
         fields['category_id'] = new_cat
         if new_cat != old_cat:
+            remember_non_goal_iban(db, tx)
             db.execute('INSERT INTO corrections (tx_id, old_category_id, new_category_id) VALUES (?, ?, ?)',
                       (tid, old_cat, new_cat))
     if 'account_to' in data:
@@ -1210,7 +1237,11 @@ def get_unreviewed_transactions():
     All-time, not scoped to a month — a review inbox shouldn't lose items when you flip months."""
     db = get_db()
     rows = db.execute(
-        '''SELECT id, date, amount, account, description, tx_type
+        '''SELECT id, date, amount, account, description, tx_type,
+                  CASE WHEN counterpart_iban IS NOT NULL AND counterpart_iban != ''
+                       THEN 1 ELSE 0 END AS has_iban,
+                  CASE WHEN counterpart_iban IS NOT NULL AND counterpart_iban != ''
+                       THEN substr(counterpart_iban, -4) ELSE NULL END AS iban_last4
            FROM transactions
            WHERE category_id IS NULL AND income_category_id IS NULL
              AND tx_type NOT IN ('Balance Adjust', 'Money Transfer')
@@ -1220,9 +1251,91 @@ def get_unreviewed_transactions():
 
     # tx_type is the direction signal — amount is always stored positive for
     # Expense-type rows, so it can't be used to tell expenses from income.
-    expenses = [dict(r) for r in rows if r['tx_type'] != 'Income']
-    income   = [dict(r) for r in rows if r['tx_type'] == 'Income']
+    items = []
+    for row in rows:
+        item = dict(row)
+        item['has_iban'] = bool(item['has_iban'])
+        items.append(item)
+    expenses = [item for item in items if item['tx_type'] != 'Income']
+    income   = [item for item in items if item['tx_type'] == 'Income']
     return jsonify({'expenses': expenses, 'income': income})
+
+
+@app.route('/api/transactions/<int:tid>/goal-transfer', methods=['POST'])
+def assign_goal_transfer(tid):
+    """Map a CHECK ME counterparty IBAN and turn only this row into a transfer."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise BadInput('Expected a JSON object.')
+
+    account_id = data.get('account_id')
+    raw_new_name = data.get('new_account_name')
+    if raw_new_name is not None and not isinstance(raw_new_name, str):
+        raise BadInput('new_account_name must be a string.')
+    new_name = (raw_new_name or '').strip()
+    if (account_id is None) == (not new_name):
+        raise BadInput('Choose either account_id or new_account_name.')
+    if account_id is not None and (not isinstance(account_id, int) or isinstance(account_id, bool)):
+        raise BadInput('account_id must be a whole number.')
+
+    db = get_db()
+    db.execute('BEGIN IMMEDIATE')
+    tx = db.execute('SELECT * FROM transactions WHERE id=?', (tid,)).fetchone()
+    if not tx:
+        return jsonify({'error': 'not found'}), 404
+    if (tx['category_id'] is not None or tx['income_category_id'] is not None
+            or tx['ignored'] or tx['tx_type'] not in ('Expense', 'Income')):
+        raise Conflict('Only an unresolved CHECK ME transaction can be mapped.')
+    iban = normalize_iban(tx['counterpart_iban'], 'counterpart_iban')
+    if not iban:
+        raise BadInput('This transaction has no counterparty IBAN.')
+
+    already = db.execute('SELECT id, name FROM accounts WHERE iban=?', (iban,)).fetchone()
+    # A positive mapping is the newer, more specific decision if this IBAN was
+    # previously reviewed as an ordinary counterparty.
+    db.execute('DELETE FROM non_goal_ibans WHERE iban=?', (iban,))
+    if account_id is not None:
+        account = db.execute('SELECT id, name, iban FROM accounts WHERE id=?',
+                             (account_id,)).fetchone()
+        if not account:
+            return jsonify({'error': 'account not found'}), 404
+        if account['name'] == tx['account']:
+            raise Conflict('The source and goal accounts must be different.')
+        if already and already['id'] != account['id']:
+            raise Conflict(f'This IBAN is already assigned to {already["name"]}.')
+        if account['iban'] and account['iban'] != iban:
+            raise Conflict('The selected account already has a different IBAN.')
+        db.execute('UPDATE accounts SET iban=? WHERE id=?', (iban, account['id']))
+        target_id, target_name = account['id'], account['name']
+    else:
+        if already:
+            raise Conflict(f'This IBAN is already assigned to {already["name"]}.')
+        existing_name = db.execute('SELECT 1 FROM accounts WHERE name=?', (new_name,)).fetchone()
+        if existing_name:
+            raise Conflict('An account with this name already exists.')
+        cur = db.execute(
+            '''INSERT INTO accounts
+               (name, type, balance, iban, balance_anchor_tx_id, balance_anchor_date)
+               VALUES (?, 'asset', 0, ?, ?, ?)''',
+            (new_name, iban, max(tid - 1, 0), tx['date']))
+        target_id, target_name = cur.lastrowid, new_name
+
+    if tx['tx_type'] == 'Expense':
+        account, account_to = tx['account'], target_name
+    else:
+        account, account_to = target_name, tx['account']
+    db.execute(
+        '''UPDATE transactions
+              SET account=?, account_to=?, tx_type='Money Transfer',
+                  category_id=NULL, income_category_id=NULL, ignored=0
+            WHERE id=?''',
+        (account, account_to, tid))
+    db.commit()
+    return jsonify({
+        'ok': True,
+        'account': {'id': target_id, 'name': target_name,
+                    'has_iban': True, 'iban_last4': iban[-4:]},
+    })
 
 
 @app.route('/api/transactions/unreviewed/count')
@@ -1242,9 +1355,10 @@ def ignore_transaction(tid):
     """Dismiss a CHECK ME transaction without assigning a category — it stays
     on the transactions list as uncategorized instead of nagging for review."""
     db = get_db()
-    tx = db.execute('SELECT id FROM transactions WHERE id=?', (tid,)).fetchone()
+    tx = db.execute('SELECT * FROM transactions WHERE id=?', (tid,)).fetchone()
     if not tx:
         return jsonify({'error': 'not found'}), 404
+    remember_non_goal_iban(db, tx)
     db.execute('UPDATE transactions SET ignored=1 WHERE id=?', (tid,))
     db.commit()
     return jsonify({'ok': True})
@@ -1269,6 +1383,7 @@ def set_tx_income_category(tid):
     # expense category. Leaving tx_type='Expense' alongside an income_category_id makes the
     # two direction signals disagree, and every consumer picks a different one:
     # balance_delta_since_anchor trusts income_category_id, the budget queries trust tx_type.
+    remember_non_goal_iban(db, tx)
     db.execute(
         "UPDATE transactions SET income_category_id=?, tx_type='Income', category_id=NULL WHERE id=?",
         (new_income_cat_id, tid)
@@ -1295,6 +1410,7 @@ def update_tx_category(tid):
     old_cat_id = tx['category_id']
     new_cat_id = parse_int(data.get('category_id'), 'category_id', 1)
 
+    remember_non_goal_iban(db, tx)
     db.execute('UPDATE transactions SET category_id=? WHERE id=?', (new_cat_id, tid))
     db.execute(
         'INSERT INTO corrections (tx_id, old_category_id, new_category_id) VALUES (?, ?, ?)',
@@ -1435,10 +1551,29 @@ def get_accounts():
         anchor_date = acc.pop('balance_anchor_date', None)
         delta  = balance_delta_since_anchor(tx_rows, acc['name'], anchor, anchor_date)
         acc['balance'] = round((acc['balance'] or 0) + delta, 2)
-        # The frontend never uses the IBAN, and this endpoint needs no auth to reach.
+        iban = acc.get('iban') or ''
+        acc['has_iban'] = bool(iban)
+        acc['iban_last4'] = iban[-4:] if iban else None
+        # Browsers only need enough metadata to display and undo a mapping.
         acc.pop('iban', None)
 
     return jsonify(accounts)
+
+
+@app.route('/api/accounts/iban-map')
+def accounts_iban_map():
+    refusal = require_api_token()
+    if refusal:
+        return refusal
+    db = get_db()
+    rows = db.execute(
+        "SELECT iban, name FROM accounts WHERE iban IS NOT NULL AND iban != ''"
+    ).fetchall()
+    excluded = db.execute('SELECT iban FROM non_goal_ibans ORDER BY iban').fetchall()
+    return jsonify({
+        'accounts': {r['iban']: r['name'] for r in rows},
+        'non_goal_ibans': [r['iban'] for r in excluded],
+    })
 
 
 @app.route('/api/accounts/last-dates')
@@ -1525,6 +1660,17 @@ def update_account(aid):
 def delete_account(aid):
     db = get_db()
     db.execute('DELETE FROM accounts WHERE id=?', (aid,))
+    db.commit()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/accounts/<int:aid>/iban', methods=['DELETE'])
+def clear_account_iban(aid):
+    db = get_db()
+    account = db.execute('SELECT id FROM accounts WHERE id=?', (aid,)).fetchone()
+    if not account:
+        return jsonify({'error': 'not found'}), 404
+    db.execute('UPDATE accounts SET iban=NULL WHERE id=?', (aid,))
     db.commit()
     return jsonify({'ok': True})
 

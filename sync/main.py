@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -271,24 +272,69 @@ DEFAULT_FILTERS = {
     "transfer_to_account": [],
     "savings_withdrawal_titles": [],
     "skip_incoming_titles": [],
+    "goal_transfer_titles": [],
 }
 
 
+def _canonical_iban(value: str, country: str = "") -> str:
+    return _iban.full_iban(value or "", country)
+
+
+def _normalize_party_name(value: str) -> str:
+    """Comparable party name, tolerant of case, accents and appended addresses."""
+    value = (value or "").replace("ł", "l").replace("Ł", "L")
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(ch for ch in value if not unicodedata.combining(ch)).casefold()
+    return " ".join(re.findall(r"[a-z0-9]+", value))
+
+
+def _is_account_holder(counterpart: str, account_holders: list | None) -> bool:
+    party = _normalize_party_name(counterpart)
+    if not party:
+        return False
+    for raw_holder in account_holders or []:
+        holder = _normalize_party_name(raw_holder)
+        if holder and (party == holder or party.startswith(holder + " ")):
+            return True
+    return False
+
+
 def filter_transactions(transactions: list, own_ibans: list, savings_ibans: list,
-                        filters: dict = None) -> list:
+                        filters: dict = None, goal_accounts: dict = None,
+                        iban_country: str = "", account_holders: list = None,
+                        non_goal_ibans: list = None) -> list:
     f = {**DEFAULT_FILTERS, **(filters or {})}
-    own_set     = set(own_ibans)
-    savings_set = set(savings_ibans)
+    own_set = {_canonical_iban(iban, iban_country) for iban in own_ibans}
+    savings_set = {_canonical_iban(iban, iban_country) for iban in savings_ibans}
+    goal_accounts = {
+        _canonical_iban(iban, iban_country): account
+        for iban, account in (goal_accounts or {}).items()
+        if iban and account
+    }
+    non_goal_set = {
+        _canonical_iban(iban, iban_country) for iban in (non_goal_ibans or []) if iban
+    }
     filtered    = []
 
     for tx in transactions:
         if tx["amount"] == 0:
             continue
 
-        c_iban      = tx["counterpart_iban"]
+        # The filter annotates rows in place. Clear only its own annotations so
+        # an offline replay (or retry in the same process) cannot retain a result
+        # from an earlier run with a different map or configuration.
+        for key in ("_transfer", "_savings", "_to_account", "_from_account",
+                    "_goal_withdrawal", "_force_check_me"):
+            tx.pop(key, None)
+
+        c_iban = _canonical_iban(
+            tx.get("_counterpart_iban_full") or tx.get("counterpart_iban", ""),
+            iban_country,
+        )
         title_lower = tx["title"].lower()
         text_lower  = f"{title_lower} {tx['counterpart'].lower()}"
         is_own_title = any(t in title_lower for t in f["own_transfer_titles"])
+        mapped_goal = goal_accounts.get(c_iban) if c_iban not in own_set else None
 
         # A rule matches when every one of its phrases appears in the text, which
         # is how "card payment" + "revolut" together mean a top-up but neither does alone.
@@ -299,6 +345,17 @@ def filter_transactions(transactions: list, own_ibans: list, savings_ibans: list
             tx["_transfer"]   = True
             tx["_savings"]    = False
             tx["_to_account"] = to_account
+        elif mapped_goal:
+            tx["_transfer"] = True
+            tx["_savings"] = False
+            if tx["amount"] > 0:
+                tx["_from_account"] = mapped_goal
+                tx["_to_account"] = ""
+                tx["_goal_withdrawal"] = True
+            else:
+                tx["_to_account"] = mapped_goal
+                tx["_from_account"] = ""
+                tx["_goal_withdrawal"] = False
         elif c_iban in savings_set or any(t in title_lower for t in f["savings_withdrawal_titles"]):
             tx["_transfer"]   = False
             tx["_savings"]    = True
@@ -317,6 +374,13 @@ def filter_transactions(transactions: list, own_ibans: list, savings_ibans: list
             tx["_transfer"]   = True
             tx["_savings"]    = False
             tx["_to_account"] = ""
+        elif (c_iban and c_iban not in own_set and c_iban not in non_goal_set
+              and (any(t and t.lower() in title_lower for t in f["goal_transfer_titles"])
+                   or _is_account_holder(tx.get("counterpart", ""), account_holders))):
+            tx["_transfer"] = False
+            tx["_savings"] = False
+            tx["_to_account"] = ""
+            tx["_force_check_me"] = True
         else:
             tx["_transfer"]   = False
             tx["_savings"]    = False
@@ -482,7 +546,9 @@ def categorize_transactions(transactions: list, cfg: dict, api_key: str) -> list
     pre_categorized: dict[int, dict] = {}
 
     for i, tx in enumerate(transactions):
-        if tx.get("_transfer"):
+        if tx.get("_force_check_me"):
+            pre_categorized[i] = {"category": "CHECK ME", "note": ""}
+        elif tx.get("_transfer"):
             pre_categorized[i] = {"category": "", "note": ""}
         elif tx.get("_savings"):
             pre_categorized[i] = {"category": "From assets", "note": ""}
@@ -560,7 +626,12 @@ def generate_money_pro_csv(transactions: list, account_name: str, account_names:
         if tx.get("_transfer"):
             tx_type     = "Money Transfer"
             category    = ""
-            account_to  = tx.get("_to_account") or account_names.get(tx.get("counterpart_iban", ""), "")
+            goal_withdrawal = tx.get("_goal_withdrawal", False)
+            row_account = tx.get("_from_account") if goal_withdrawal else account_name
+            account_to = account_name if goal_withdrawal else (
+                tx.get("_to_account")
+                or account_names.get(tx.get("counterpart_iban", ""), "")
+            )
             if not account_to:
                 print(f"  WARNING: own transfer with no target account name — IBAN {tx.get('counterpart_iban', '?')[-10:]}... Add it to account_names in config.json")
             amount_recv = amt_str
@@ -569,11 +640,13 @@ def generate_money_pro_csv(transactions: list, account_name: str, account_names:
             category    = tx.get("category", "")
             account_to  = ""
             amount_recv = ""
+            row_account = account_name
         else:
             tx_type     = "Expense"
             category    = tx.get("category", "")
             account_to  = ""
             amount_recv = ""
+            row_account = account_name
 
         dt = tx["transaction_date"]
         try:
@@ -590,7 +663,7 @@ def generate_money_pro_csv(transactions: list, account_name: str, account_names:
         check_number = tx.get("_eb_id", "")
 
         lines.append(_money_pro_csv_line([
-            dt_fmt, amt_str, account_name, amount_recv, account_to, "",
+            dt_fmt, amt_str, row_account, amount_recv, account_to, "",
             category, full_desc, tx_type, tx.get("_counterpart_iban_full", ""),
             check_number, "", "",
         ]))
@@ -725,6 +798,46 @@ def _eb_config(cfg: dict) -> dict:
     return eb
 
 
+def _load_goal_accounts() -> tuple[dict, set]:
+    """Best-effort positive and negative IBAN decisions from the budget app."""
+    if not budget_client.API_TOKEN:
+        print("  WARNING: goal IBAN mapping is disabled because MB_API_TOKEN is not set. "
+              "Set the same token for the app and sync even when browser login is disabled; "
+              "continuing without saved IBAN decisions.")
+        return {}, set()
+    try:
+        data = budget_client.get("/api/accounts/iban-map")
+        if not isinstance(data, dict):
+            raise ValueError("response is not an object")
+        # Accept the brief stage-2 response shape as well as the current state
+        # object, so a rolling deployment does not break a sync between restarts.
+        accounts = data.get("accounts", data)
+        excluded = data.get("non_goal_ibans", [])
+        if not isinstance(accounts, dict) or not isinstance(excluded, list):
+            raise ValueError("response has invalid IBAN state")
+        account_map = {
+            str(iban).replace(" ", "").upper(): name
+            for iban, name in accounts.items()
+            if isinstance(iban, str) and isinstance(name, str) and iban and name
+        }
+        non_goals = {
+            iban.replace(" ", "").upper()
+            for iban in excluded if isinstance(iban, str) and iban
+        }
+        return account_map, non_goals
+    except budget_client.HTTPError as exc:
+        if exc.code in (401, 403):
+            print("  WARNING: goal IBAN mapping is disabled: MB_API_TOKEN is missing or "
+                  "does not match the app. Continuing without saved IBAN decisions.")
+        else:
+            print(f"  [goal_accounts] app map unavailable (HTTP {exc.code}) — "
+                  "discovery candidates still go to CHECK ME.")
+        return {}, set()
+    except Exception as exc:
+        print(f"  [goal_accounts] app map unavailable ({exc}) — discovery candidates still go to CHECK ME.")
+        return {}, set()
+
+
 def cmd_fetch_setup(args):
     cfg = load_config()
     eb = _eb_config(cfg)
@@ -782,6 +895,7 @@ def cmd_fetch(args):
     eb = _eb_config(cfg)
     output_dir = resolve_path(cfg["output_dir"])
     account_names = cfg.get("account_names", {})
+    goal_accounts, non_goal_ibans = _load_goal_accounts()
     days_back = args.days or eb.get("days_back", 30)
     use_smart_window = args.days is None
 
@@ -867,7 +981,10 @@ def cmd_fetch(args):
         try:
             transactions = filter_transactions(
                 raw_transactions, cfg["own_ibans"], cfg.get("savings_ibans", []),
-                cfg.get("filters")
+                cfg.get("filters"), goal_accounts=goal_accounts,
+                iban_country=_iban_country(cfg),
+                account_holders=cfg.get("account_holders", []),
+                non_goal_ibans=non_goal_ibans,
             )
             transfers = sum(1 for tx in transactions if tx.get("_transfer"))
             print(f"  After filtering: {len(transactions)} ({transfers} of them own transfers)")
@@ -886,7 +1003,8 @@ def cmd_fetch(args):
                     print(f"  {tx['transaction_date']}  {sign}{amt:>9.2f} {cur}  {tx.get('category',''):<30}  {tx['title'][:40]}")
                     tx_type = "Money Transfer" if tx.get("_transfer") else ("Income" if tx["amount"] > 0 else "Expense")
                     if tx.get("_transfer"):
-                        other = tx.get("_to_account") or account_names.get(tx.get("counterpart_iban", ""), "") or "?"
+                        other = (tx.get("_from_account") or tx.get("_to_account")
+                                 or account_names.get(tx.get("counterpart_iban", ""), "") or "?")
                         description = f"{'->' if tx['amount'] < 0 else '<-'} {other}"
                     else:
                         description = (tx.get("title") or "")[:80]

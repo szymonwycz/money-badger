@@ -35,6 +35,7 @@ def _make_db(root):
     con.execute("""
         CREATE TABLE transactions (
             id INTEGER PRIMARY KEY, date TEXT, amount REAL, account TEXT,
+            account_to TEXT DEFAULT '',
             category_id INTEGER, income_category_id INTEGER,
             tx_type TEXT DEFAULT 'Expense', ignored INTEGER DEFAULT 0
         )
@@ -236,6 +237,28 @@ def test_orphan_raw_pull_window_can_run_from_yesterday_through_today():
 
     findings = self_checker.check_orphan_raw_pulls(cfg)
     assert any(f"fetched {yesterday}..{today}" in x for x in findings), findings
+
+
+def test_orphan_raw_pull_accepts_a_transfer_into_the_account():
+    import os
+    import time
+    root = _tmp_root()
+    con = _make_db(root)
+    con.execute("""INSERT INTO transactions
+                   (date, amount, account, account_to, tx_type)
+                   VALUES ('2026-07-01', 10.0, 'Main', 'Goal', 'Money Transfer')""")
+    con.commit()
+    con.close()
+    cfg = {"account_names": {"1111": "Goal"}}
+    raw = {"transactions": [
+        {"transaction_amount": {"amount": "10.00"}},
+        {"transaction_amount": {"amount": "20.00"}},
+    ]}
+    f = root / "raw_pulls" / "1111_2026-07-01_2026-07-01_20321009T111500.json"
+    f.write_text(json.dumps(raw))
+    old_time = time.time() - 86400
+    os.utime(f, (old_time, old_time))
+    assert self_checker.check_orphan_raw_pulls(cfg) == []
 
 
 def test_checkme_backlog_respects_ignored_and_type_filters():

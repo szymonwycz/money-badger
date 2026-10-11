@@ -72,6 +72,14 @@ def _set_balance(client, db, name, balance):
     return aid
 
 
+def _insert_account(db, name, account_type='asset', iban=None):
+    cur = db.execute(
+        'INSERT INTO accounts (name, type, balance, iban) VALUES (?, ?, 0, ?)',
+        (name, account_type, iban))
+    db.commit()
+    return cur.lastrowid
+
+
 # ── unit: helpers ─────────────────────────────────────────────────────────────
 
 def test_parse_flexible_date():
@@ -87,6 +95,118 @@ def test_parse_flexible_date():
 def test_next_month_year():
     assert next_month_year(12, 2026) == (1, 2027)
     assert next_month_year(1, 2026) == (2, 2026)
+
+
+# ── goal/subaccount IBAN mapping ─────────────────────────────────────────────
+
+def test_goal_mapping_existing_account_changes_only_selected_checkme(client, db):
+    iban = 'GB82WEST12345698765432'
+    aid = _insert_account(db, 'Stage 2 existing goal')
+    corrections_before = db.execute('SELECT COUNT(*) FROM corrections').fetchone()[0]
+    _bulk(client, [
+        {'date': '01/10/2032', 'amount': 10, 'account': 'Main account',
+         'category': 'CHECK ME', 'description': 'older row', 'hash': 'goal-old-stage2',
+         'counterpart_iban': iban},
+        {'date': '02/10/2032', 'amount': 20, 'account': 'Main account',
+         'category': 'CHECK ME', 'description': 'selected row', 'hash': 'goal-new-stage2',
+         'counterpart_iban': iban},
+    ])
+    old = db.execute("SELECT * FROM transactions WHERE source_hash='goal-old-stage2'").fetchone()
+    selected = db.execute(
+        "SELECT * FROM transactions WHERE source_hash='goal-new-stage2'").fetchone()
+    db.execute('INSERT INTO non_goal_ibans (iban) VALUES (?)', (iban,))
+    db.commit()
+
+    before = client.get('/api/transactions/unreviewed').get_json()
+    shown = next(t for t in before['expenses'] if t['id'] == selected['id'])
+    assert shown['has_iban'] is True and shown['iban_last4'] == '5432'
+    assert iban not in json.dumps(before)
+
+    res = client.post(f'/api/transactions/{selected["id"]}/goal-transfer',
+                      json={'account_id': aid})
+    assert res.status_code == 200, res.get_json()
+    mapped = db.execute('SELECT * FROM transactions WHERE id=?', (selected['id'],)).fetchone()
+    untouched = db.execute('SELECT * FROM transactions WHERE id=?', (old['id'],)).fetchone()
+    assert mapped['tx_type'] == 'Money Transfer'
+    assert mapped['account'] == 'Main account'
+    assert mapped['account_to'] == 'Stage 2 existing goal'
+    assert untouched['tx_type'] == 'Expense' and untouched['account_to'] == ''
+    assert db.execute('SELECT iban FROM accounts WHERE id=?', (aid,)).fetchone()['iban'] == iban
+    assert db.execute('SELECT 1 FROM non_goal_ibans WHERE iban=?', (iban,)).fetchone() is None
+    assert db.execute('SELECT COUNT(*) FROM corrections').fetchone()[0] == corrections_before
+
+
+def test_goal_mapping_income_can_create_zero_balance_asset_and_be_undone(client, db):
+    iban = 'DE89370400440532013000'
+    _bulk(client, [{
+        'date': '03/10/2032', 'amount': 30, 'account': 'Main account',
+        'category': 'CHECK ME', 'tx_type': 'Income', 'description': 'withdrawal',
+        'hash': 'goal-income-stage2', 'counterpart_iban': iban,
+    }])
+    tx = db.execute(
+        "SELECT * FROM transactions WHERE source_hash='goal-income-stage2'").fetchone()
+    res = client.post(f'/api/transactions/{tx["id"]}/goal-transfer',
+                      json={'new_account_name': 'Stage 2 new goal'})
+    assert res.status_code == 200, res.get_json()
+    aid = res.get_json()['account']['id']
+
+    account = db.execute('SELECT * FROM accounts WHERE id=?', (aid,)).fetchone()
+    mapped = db.execute('SELECT * FROM transactions WHERE id=?', (tx['id'],)).fetchone()
+    assert account['type'] == 'asset' and account['balance'] == 0
+    assert account['iban'] == iban
+    assert mapped['account'] == 'Stage 2 new goal'
+    assert mapped['account_to'] == 'Main account'
+    assert mapped['tx_type'] == 'Money Transfer'
+
+    assert client.delete(f'/api/accounts/{aid}/iban').status_code == 200
+    assert db.execute('SELECT iban FROM accounts WHERE id=?', (aid,)).fetchone()['iban'] is None
+    still_transfer = db.execute('SELECT tx_type, account, account_to FROM transactions WHERE id=?',
+                                (tx['id'],)).fetchone()
+    assert tuple(still_transfer) == ('Money Transfer', 'Stage 2 new goal', 'Main account')
+
+
+def test_full_iban_map_requires_api_token_and_browser_endpoints_stay_redacted(
+        client, db, monkeypatch):
+    iban = 'FR1420041010050500013M02606'
+    _insert_account(db, 'Stage 2 token goal', iban=iban)
+    monkeypatch.setattr(badger, 'API_TOKEN', 'stage-2-secret')
+
+    assert client.get('/api/accounts/iban-map').status_code == 401
+    assert client.get('/api/accounts/iban-map',
+                      headers={'X-MB-Token': 'wrong'}).status_code == 401
+    response = client.get('/api/accounts/iban-map',
+                          headers={'X-MB-Token': 'stage-2-secret'})
+    assert response.status_code == 200
+    assert response.get_json()['accounts'][iban] == 'Stage 2 token goal'
+
+    public_accounts = client.get('/api/accounts').get_json()
+    shown = next(a for a in public_accounts if a['name'] == 'Stage 2 token goal')
+    assert 'iban' not in shown
+    assert shown['has_iban'] is True and shown['iban_last4'] == '2606'
+    assert iban not in json.dumps(public_accounts)
+
+
+def test_resolving_checkme_as_ordinary_remembers_non_goal_iban(client, db, monkeypatch):
+    iban = 'GB29NWBK60161331926819'
+    _bulk(client, [{
+        'date': '04/10/2032', 'amount': 40, 'account': 'Main account',
+        'category': 'CHECK ME', 'description': 'ordinary external transfer',
+        'hash': 'goal-rejected-stage2', 'counterpart_iban': iban,
+    }])
+    tx = db.execute(
+        "SELECT * FROM transactions WHERE source_hash='goal-rejected-stage2'").fetchone()
+    category = db.execute(
+        "SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL"
+    ).fetchone()
+    # Desktop CHECK ME uses the generic edit endpoint; mobile uses /category.
+    assert client.put(f'/api/transactions/{tx["id"]}',
+                      json={'category_id': category['id']}).status_code == 200
+    assert db.execute('SELECT 1 FROM non_goal_ibans WHERE iban=?', (iban,)).fetchone()
+
+    monkeypatch.setattr(badger, 'API_TOKEN', 'stage-2-secret')
+    state = client.get('/api/accounts/iban-map',
+                       headers={'X-MB-Token': 'stage-2-secret'}).get_json()
+    assert iban in state['non_goal_ibans']
 
 
 # ── bulk import ───────────────────────────────────────────────────────────────

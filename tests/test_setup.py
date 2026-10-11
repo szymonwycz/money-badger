@@ -48,9 +48,11 @@ def test_counterpart_iban_migration_upgrades_existing_database_idempotently(tmp_
                         name TEXT PRIMARY KEY,
                         applied_at TEXT NOT NULL)''')
     conn.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY)')
+    conn.execute('CREATE TABLE accounts (id INTEGER PRIMARY KEY, iban TEXT)')
     conn.executemany(
         'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
-        [(name, '2032-10-09') for name, _fn in migrations.MIGRATIONS[:-1]],
+        [(name, '2032-10-09') for name, _fn in migrations.MIGRATIONS
+         if name < '0010_transaction_counterpart_iban'],
     )
     conn.commit()
     conn.close()
@@ -67,6 +69,30 @@ def test_counterpart_iban_migration_upgrades_existing_database_idempotently(tmp_
     conn.close()
     assert 'counterpart_iban' in columns
     assert applied == 1
+
+
+def test_account_iban_migration_creates_a_partial_unique_index(tmp_path):
+    path = tmp_path / 'iban-index.db'
+    migrations.migrate(path)
+    conn = sqlite3.connect(path)
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(accounts)")}
+    assert 'idx_accounts_iban_unique' in indexes
+    conn.execute("INSERT INTO accounts (name, iban) VALUES ('First', 'GB82WEST12345698765432')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO accounts (name, iban) VALUES ('Second', 'GB82WEST12345698765432')")
+    conn.execute("INSERT INTO accounts (name, iban) VALUES ('No IBAN 1', NULL)")
+    conn.execute("INSERT INTO accounts (name, iban) VALUES ('No IBAN 2', NULL)")
+    conn.close()
+
+
+def test_non_goal_iban_migration_creates_decision_table(tmp_path):
+    path = tmp_path / 'non-goal.db'
+    migrations.migrate(path)
+    conn = sqlite3.connect(path)
+    conn.execute("INSERT INTO non_goal_ibans (iban) VALUES ('GB29NWBK60161331926819')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO non_goal_ibans (iban) VALUES ('GB29NWBK60161331926819')")
+    conn.close()
 
 
 def test_pages_redirect_to_setup_before_it_is_done(client):
