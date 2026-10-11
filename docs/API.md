@@ -58,7 +58,7 @@ no author.
 | Endpoint | Description |
 |---|---|
 | `GET /api/budget?month=&year=` | `{additionals: {cat_id: [{id, amount, description}]}, spent: {cat_id: total}, income}` — income falls back to legacy `monthly_income` when no `income_entries` exist |
-| `POST /api/basic` | `{category_id, amount, month, year}` — upsert per-month BASIC |
+| `POST /api/basic` | `{category_id, amount, month, year, expected_amount?}` — upsert per-month BASIC. With `expected_amount`, a cents-normalized mismatch returns **409** and `{error, current_amount}`; omitting it keeps last-write-wins behaviour |
 | `POST /api/basic/copy-next` | `{month, year}` — copy effective BASIC to month+1 |
 | `POST /api/additional` | `{category_id, amount, description?, month, year}` |
 | `DELETE /api/additional/<id>` | |

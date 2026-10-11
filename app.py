@@ -8,6 +8,7 @@ import io
 import os
 import re
 import time
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -353,6 +354,11 @@ def parse_money(value, field='amount'):
     if out != out or out in (float('inf'), float('-inf')):
         raise BadInput(f'{field} must be a finite number')
     return out
+
+
+def money_cents(value):
+    """Normalize a validated money value to integer cents for comparisons."""
+    return int((Decimal(str(value)) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
 
 def parse_int(value, field, lo=None, hi=None):
@@ -872,10 +878,27 @@ def set_basic():
     db    = get_db()
     month = parse_int(data.get('month', datetime.now().month), 'month', 1, 12)
     year  = parse_int(data.get('year', datetime.now().year), 'year', 1970, 2200)
+    cat_id = parse_int(data['category_id'], 'category_id', 1)
+    amount = parse_money(data.get('amount'))
+
+    # Mobile sends the value it originally loaded. Lock before reading so another
+    # request cannot update BASIC between the comparison and this upsert. Clients
+    # that omit expected_amount retain the existing last-write-wins behaviour.
+    if 'expected_amount' in data:
+        expected = parse_money(data['expected_amount'], 'expected_amount')
+        db.execute('BEGIN IMMEDIATE')
+        current = get_effective_basics(db, month, year).get(cat_id, 0)
+        if money_cents(current) != money_cents(expected):
+            db.rollback()
+            return jsonify({
+                'error': 'BASIC changed since it was loaded.',
+                'current_amount': current,
+            }), 409
+
     db.execute(
         'INSERT INTO basic_budgets_monthly (category_id, month, year, amount) VALUES (?, ?, ?, ?)'
         ' ON CONFLICT(category_id, month, year) DO UPDATE SET amount=excluded.amount',
-        (data['category_id'], month, year, parse_money(data.get('amount')))
+        (cat_id, month, year, amount)
     )
     db.commit()
     return jsonify({'ok': True})

@@ -51,6 +51,9 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
 - **The mobile stylesheet now lives in `static/mobile.css` and uses shared design
   tokens.** The service worker precaches it, all controls meet the 44px touch target,
   and the public-only goal and IBAN actions retain their teal treatment.
+- **`POST /api/basic` accepts an optional `expected_amount` precondition.** Stale edits
+  receive HTTP 409 with the current value instead of overwriting a newer BASIC; clients
+  that omit the field keep last-write-wins behaviour.
 - **Anthropic defaults moved to Claude Haiku 5.5 for categorization and Claude
   Sonnet 5.5 for learning.** Both use medium effort and a 16,000-token response
   budget. Thinking blocks are ignored while all text blocks are joined; refusals,

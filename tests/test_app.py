@@ -494,7 +494,102 @@ def test_delete_income_category_in_use_is_clean_error(client, db):
     assert client.delete(f'/api/income-categories/{cid2}').status_code == 200
 
 
-# ── budget copy-next ──────────────────────────────────────────────────────────
+# ── budget writes and copy-next ───────────────────────────────────────────────
+
+def test_basic_write_accepts_matching_expected_amount(client, db):
+    cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
+    client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 100, 'month': 1, 'year': 2040,
+    })
+
+    res = client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 125, 'expected_amount': 100,
+        'month': 1, 'year': 2040,
+    })
+
+    assert res.status_code == 200
+    row = db.execute('''SELECT amount FROM basic_budgets_monthly
+                        WHERE category_id=? AND month=1 AND year=2040''', (cat['id'],)).fetchone()
+    assert row['amount'] == 125
+
+
+def test_basic_expected_amount_compares_integer_cents_not_float_noise(client, db):
+    cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
+    db.execute('''INSERT INTO basic_budgets_monthly (category_id, month, year, amount)
+                  VALUES (?, 5, 2040, ?)''', (cat['id'], 100.0000000001))
+    db.commit()
+
+    res = client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 125, 'expected_amount': 100,
+        'month': 5, 'year': 2040,
+    })
+
+    assert res.status_code == 200
+
+
+def test_basic_expected_amount_accepts_string_category_id(client, db):
+    cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
+    client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 200, 'month': 6, 'year': 2040,
+    })
+
+    res = client.post('/api/basic', json={
+        'category_id': str(cat['id']), 'amount': 225, 'expected_amount': 200,
+        'month': 6, 'year': 2040,
+    })
+
+    assert res.status_code == 200
+
+
+def test_basic_write_rejects_stale_expected_amount_without_writing(client, db):
+    cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
+    client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 200, 'month': 2, 'year': 2040,
+    })
+
+    res = client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 300, 'expected_amount': 100,
+        'month': 2, 'year': 2040,
+    })
+
+    assert res.status_code == 409
+    assert res.get_json() == {
+        'error': 'BASIC changed since it was loaded.',
+        'current_amount': 200,
+    }
+    row = db.execute('''SELECT amount FROM basic_budgets_monthly
+                        WHERE category_id=? AND month=2 AND year=2040''', (cat['id'],)).fetchone()
+    assert row['amount'] == 200
+
+
+def test_basic_missing_row_has_expected_amount_zero(client, db):
+    client.post('/api/categories', json={'name': 'CAS category without legacy BASIC'})
+    cat_id = db.execute(
+        "SELECT id FROM categories WHERE name='CAS category without legacy BASIC' ORDER BY id DESC"
+    ).fetchone()['id']
+
+    res = client.post('/api/basic', json={
+        'category_id': cat_id, 'amount': 75, 'expected_amount': 0,
+        'month': 3, 'year': 2040,
+    })
+
+    assert res.status_code == 200
+
+
+def test_basic_write_without_expected_amount_keeps_last_write_wins(client, db):
+    cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
+    client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 400, 'month': 4, 'year': 2040,
+    })
+    res = client.post('/api/basic', json={
+        'category_id': cat['id'], 'amount': 450, 'month': 4, 'year': 2040,
+    })
+
+    assert res.status_code == 200
+    row = db.execute('''SELECT amount FROM basic_budgets_monthly
+                        WHERE category_id=? AND month=4 AND year=2040''', (cat['id'],)).fetchone()
+    assert row['amount'] == 450
+
 
 def test_copy_basic_next_month(client, db):
     cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
