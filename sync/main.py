@@ -1165,6 +1165,22 @@ def parse_money_pro_csv(path: Path) -> list:
     return transactions
 
 
+GENERIC_LEARN_RULE_KEYS = {
+    # English and the generic labels commonly emitted by card processors.
+    "card payment", "payment card", "card purchase", "debit card purchase",
+    "credit card purchase", "purchase by card", "pos payment", "pos purchase",
+    "card transaction", "transaction by card", "visa plat",
+    # Polish, including ASCII variants seen after bank/export normalization.
+    "płatność kartą", "platnosc karta", "przelew kartą", "przelew karta",
+    "transakcja kartą", "transakcja karta", "płatność bezgotówkowa",
+    "platnosc bezgotowkowa",
+    # Other common European bank boilerplate. Merchant names remain learnable.
+    "kartenzahlung", "paiement par carte", "pago con tarjeta",
+    "pagamento con carta", "pagamento com cartão", "pagamento com cartao",
+    "kaartbetaling", "platba kartou", "plata cu cardul",
+}
+
+
 def generate_new_rules(transactions: list, api_key: str, hints: list = None) -> dict:
     by_category = defaultdict(list)
     for tx in transactions:
@@ -1172,7 +1188,11 @@ def generate_new_rules(transactions: list, api_key: str, hints: list = None) -> 
 
     examples = {cat: list(dict.fromkeys(descs))[:5] for cat, descs in by_category.items()}
 
-    valid_list = "\n".join(f"  {c}" for c in sorted(valid_categories()))
+    learnable_categories = sorted(
+        category for category in examples
+        if category in valid_categories() and category != "CHECK ME"
+    )
+    allowed_list = "\n".join(f"  {c}" for c in learnable_categories)
 
     # Wording the local banks use, from the market hint pack. Empty for a market
     # nobody has written a pack for — the rules below stand on their own.
@@ -1202,13 +1222,21 @@ Produce JSON with the new rules:
 }}
 
 Rules:
-- Use ONLY categories from the list below, copied character for character
-  (spaces and dashes included) — any other name means the rule is thrown away:
-{valid_list}
+- Use ONLY categories that actually occur in the examples and are listed below,
+  copied character for character — any other name means the rule is thrown away:
+{allowed_list}
+- NEVER produce a rule whose category is CHECK ME. CHECK ME means no decision was
+  made, while the input corrections are decisions already made by the user
 - Produce rules ONLY for expenses – skip income
 - Priority 1 = very confident rule, 2 = likely, 3 = possible
-- Pick up merchant names from card payment descriptions
-- Short, specific patterns are better than general ones{hint_lines}
+- Every keyword or pattern must be a literal fragment of at least one description
+  assigned to the same category
+- For card payments, use the merchant name rather than generic bank boilerplate.
+  Never use phrases such as "card payment", "POS purchase", "payment card",
+  "płatność kartą", "VISA PLAT", "przelew kartą", "Kartenzahlung",
+  "paiement par carte", "pago con tarjeta" or their unaccented variants
+- A rule must identify a specific merchant or kind of purchase. If an example
+  provides no such evidence, skip it instead of guessing{hint_lines}
 
 Return ONLY the JSON."""
 
@@ -1219,10 +1247,41 @@ Return ONLY the JSON."""
 
 def _normalize_rule_key(value) -> str:
     """Normalize only case and whitespace; specific longer phrases stay distinct."""
-    return " ".join(value.lower().split()) if isinstance(value, str) else ""
+    return " ".join(value.casefold().split()) if isinstance(value, str) else ""
 
 
-def drop_invalid_rules(rules: dict, account_holders: list = None) -> dict:
+def _rule_rejection_reason(key, category, holder_names: set,
+                           examples_by_category: dict | None) -> str | None:
+    normalized_key = _normalize_rule_key(key)
+    if not normalized_key:
+        return "empty or non-text key"
+    if normalized_key in holder_names:
+        return "it is only an account holder's name"
+    if not isinstance(category, str) or category not in valid_categories():
+        return f"no such category '{category}'"
+    if category == "CHECK ME":
+        return "CHECK ME cannot be the target of a rule produced by learn"
+    if any(generic in normalized_key for generic in GENERIC_LEARN_RULE_KEYS):
+        return "generic bank wording, not a merchant or kind of purchase"
+    if examples_by_category is not None:
+        category_examples = examples_by_category.get(category)
+        if not category_examples:
+            return f"category '{category}' does not occur in the input corrections"
+        if not any(normalized_key in description for description in category_examples):
+            return f"that fragment does not occur in an example for '{category}'"
+        conflicting = [
+            other_category for other_category, descriptions in examples_by_category.items()
+            if other_category != category
+            and any(normalized_key in description for description in descriptions)
+        ]
+        if conflicting:
+            return ("the same fragment also occurs in examples for other categories: "
+                    + ", ".join(sorted(conflicting)))
+    return None
+
+
+def drop_invalid_rules(rules: dict, account_holders: list = None,
+                       transactions: list = None) -> dict:
     """Rules are written by an LLM from the corrections CSV, and it invents category
     names ("Child: Nursery: Fees", "Home: Tools&Materials"). apply_rules returns
     the invented name, validate_category rejects it, and the transaction lands in
@@ -1230,34 +1289,68 @@ def drop_invalid_rules(rules: dict, account_holders: list = None) -> dict:
     door so a bad rule can never be written to rules.json.
 
     A holder's bare full name is also too broad: it appears in unrelated
-    transfers and invoices. A longer phrase containing it remains allowed.
+    transfers and invoices. With correction examples supplied by cmd_learn, every
+    new rule must additionally be supported by its category and avoid generic bank
+    wording. Existing rules deliberately do not pass through this validator.
     """
     holder_names = {
         normalized for value in (account_holders or [])
         if (normalized := _normalize_rule_key(value))
     }
+    examples_by_category = None
+    if transactions is not None:
+        examples_by_category = defaultdict(list)
+        for tx in transactions:
+            category = tx.get("category")
+            description = _normalize_rule_key(tx.get("description"))
+            if isinstance(category, str) and description:
+                examples_by_category[category].append(description)
+
     kept = {"keywords": {}, "merchant_map": {}, "patterns": []}
+    if not isinstance(rules, dict):
+        print("  Dropping learn response — the top-level JSON value is not an object")
+        return kept
+
     for section in ("keywords", "merchant_map"):
-        for key, cat in rules.get(section, {}).items():
-            if _normalize_rule_key(key) in holder_names:
-                print(f"  Dropping rule '{key}' — it is only an account holder's name")
-            elif cat in valid_categories():
-                kept[section][key] = cat
+        candidates = rules.get(section, {})
+        if not isinstance(candidates, dict):
+            print(f"  Dropping section '{section}' — expected a JSON object")
+            continue
+        for key, cat in candidates.items():
+            reason = _rule_rejection_reason(
+                key, cat, holder_names, examples_by_category)
+            if reason:
+                print(f"  Dropping rule '{key}' → '{cat}' — {reason}")
             else:
-                print(f"  Dropping rule '{key}' — no such category '{cat}'")
-    for p in rules.get("patterns", []):
+                kept[section][key] = cat
+
+    patterns = rules.get("patterns", [])
+    if not isinstance(patterns, list):
+        print("  Dropping section 'patterns' — expected a JSON list")
+        patterns = []
+    for p in patterns:
+        if not isinstance(p, dict):
+            print(f"  Dropping pattern '{p}' — expected a JSON object")
+            continue
         pattern = p.get("pattern")
-        if _normalize_rule_key(pattern) in holder_names:
-            print(f"  Dropping pattern '{pattern}' — it is only an account holder's name")
-        elif p.get("category") in valid_categories():
-            kept["patterns"].append(p)
+        category = p.get("category")
+        priority = p.get("priority")
+        reason = _rule_rejection_reason(
+            pattern, category, holder_names, examples_by_category)
+        if reason:
+            print(f"  Dropping pattern '{pattern}' → '{category}' — {reason}")
+        elif (not isinstance(priority, int) or isinstance(priority, bool)
+              or priority not in (1, 2, 3)):
+            print(f"  Dropping pattern '{pattern}' → '{category}' — "
+                  "priority must be the number 1, 2 or 3")
         else:
-            print(f"  Dropping pattern '{pattern}' — no such category '{p.get('category')}'")
+            kept["patterns"].append(p)
     return kept
 
 
-def merge_rules(existing: dict, new_rules: dict, account_holders: list = None) -> dict:
-    new_rules = drop_invalid_rules(new_rules, account_holders)
+def merge_rules(existing: dict, new_rules: dict, account_holders: list = None,
+                transactions: list = None) -> dict:
+    new_rules = drop_invalid_rules(new_rules, account_holders, transactions)
     merged = {
         "keywords":     {**existing.get("keywords", {}),     **new_rules.get("keywords", {})},
         "merchant_map": {**existing.get("merchant_map", {}), **new_rules.get("merchant_map", {})},
@@ -1311,12 +1404,19 @@ def cmd_learn(args):
 
     new_rules = generate_new_rules(all_transactions, api_key,
                                    market_hints(cfg, "learn_hints"))
-    print(f"  → {len(new_rules.get('keywords', {}))} keywords, "
-          f"{len(new_rules.get('patterns', []))} patterns, "
-          f"{len(new_rules.get('merchant_map', {}))} merchant mappings")
+    if isinstance(new_rules, dict):
+        keywords = new_rules.get("keywords")
+        patterns = new_rules.get("patterns")
+        merchants = new_rules.get("merchant_map")
+        print(f"  → {len(keywords) if isinstance(keywords, dict) else 0} keywords, "
+              f"{len(patterns) if isinstance(patterns, list) else 0} patterns, "
+              f"{len(merchants) if isinstance(merchants, dict) else 0} merchant mappings")
+    else:
+        print("  → learn response is not a JSON object; the validator will drop it")
 
     existing = load_rules()
-    merged   = merge_rules(existing, new_rules, cfg.get("account_holders"))
+    merged   = merge_rules(existing, new_rules, cfg.get("account_holders"),
+                           all_transactions)
 
     print(f"\nAfter merging: {len(merged['keywords'])} keywords, "
           f"{len(merged['patterns'])} patterns, "

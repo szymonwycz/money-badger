@@ -452,7 +452,8 @@ def test_learn_fake_llm_does_not_save_holder_only_rule(monkeypatch, tmp_path):
     correction = corrections / 'budget_corrections_test.csv'
     correction.write_text(
         'Date;Amount;Category;Description;Transaction Type\n'
-        '2032-10-09;10.00;Groceries;therapy payment;Expense\n', encoding='utf-8')
+        '2032-10-09;10.00;Groceries;therapy alex example payment;Expense\n',
+        encoding='utf-8')
     rules = tmp_path / 'rules.json'
     rules.write_text(
         '{"keywords": {}, "merchant_map": {}, "patterns": []}', encoding='utf-8')
@@ -470,5 +471,65 @@ def test_learn_fake_llm_does_not_save_holder_only_rule(monkeypatch, tmp_path):
     saved = json.loads(rules.read_text(encoding='utf-8'))
     assert saved['keywords'] == {}
     assert [p['pattern'] for p in saved['patterns']] == ['therapy alex example']
+    assert not correction.exists()
+    assert (corrections / 'processed' / correction.name).exists()
+
+
+def test_learn_mocked_reply_drops_check_me_bank_phrase_and_keeps_merchant(
+        monkeypatch, tmp_path, capsys):
+    """Regression coverage with a local fake: no LLM provider is called."""
+    corrections = tmp_path / 'Corrections'
+    corrections.mkdir()
+    correction = corrections / 'budget_corrections_test.csv'
+    correction.write_text(
+        'Date;Amount;Category;Description;Transaction Type\n'
+        '2032-10-10;49.99;Personal: Clothing;'
+        'VISA PLAT 000000******1234 PŁATNOŚĆ KARTĄ 49.99 EUR Example Outfitters;Expense\n',
+        encoding='utf-8',
+    )
+    rules = tmp_path / 'rules.json'
+    rules.write_text(
+        '{"keywords": {}, "merchant_map": {}, "patterns": []}', encoding='utf-8')
+    learned = {
+        'keywords': {},
+        'merchant_map': {'example outfitters': 'Personal: Clothing'},
+        'patterns': [{
+            'pattern': 'płatność kartą',
+            'category': 'CHECK ME',
+            'priority': 3,
+        }],
+    }
+    prompts = []
+
+    def fake_complete(prompt, **kwargs):
+        prompts.append((prompt, kwargs))
+        return json.dumps(learned, ensure_ascii=False)
+
+    monkeypatch.setattr(main.llm, 'complete', fake_complete)
+    monkeypatch.setattr(main, 'RULES_FILE', rules)
+    monkeypatch.setattr(main, 'load_config', lambda: {
+        'corrections_dir': str(corrections),
+        'account_holders': [],
+    })
+    monkeypatch.setattr(main, 'load_env', lambda: {'ANTHROPIC_API_KEY': 'fake-key'})
+    monkeypatch.setattr(main, '_categories', (
+        'EXPENSES:\n  Personal: Clothing\n', {'Personal: Clothing', 'CHECK ME'}))
+
+    main.cmd_learn(SimpleNamespace(dry_run=False))
+
+    saved = json.loads(rules.read_text(encoding='utf-8'))
+    assert saved == {
+        'keywords': {},
+        'merchant_map': {'example outfitters': 'Personal: Clothing'},
+        'patterns': [],
+    }
+    assert len(prompts) == 1
+    prompt, kwargs = prompts[0]
+    assert 'NEVER produce a rule whose category is CHECK ME' in prompt
+    assert 'card payment' in prompt and 'płatność kartą' in prompt
+    assert kwargs['task'] == 'learn'
+    log = capsys.readouterr().out
+    assert "Dropping pattern 'płatność kartą' → 'CHECK ME'" in log
+    assert 'CHECK ME cannot be the target of a rule produced by learn' in log
     assert not correction.exists()
     assert (corrections / 'processed' / correction.name).exists()

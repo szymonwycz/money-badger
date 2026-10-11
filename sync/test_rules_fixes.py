@@ -14,7 +14,7 @@ import main
 # doesn't need a running server.
 CATEGORIES = {
     "Groceries", "Transport", "Transport: Fuel", "Children",
-    "Children: Childcare", "CHECK ME",
+    "Children: Childcare", "Personal: Clothing", "CHECK ME",
 }
 
 
@@ -92,6 +92,69 @@ def test_invented_categories_never_reach_rules_json():
     )
     assert merged["keywords"] == {"lidl": "Groceries"}
     assert merged["patterns"] == []
+
+
+@pytest.mark.parametrize("generic_key", [
+    "card payment",
+    "płatność kartą",
+    "visa plat 000000",
+    "Kartenzahlung",
+    "paiement par carte",
+])
+def test_learn_rejects_generic_bank_text_in_multiple_languages(generic_key, capsys):
+    transactions = [{
+        "category": "Personal: Clothing",
+        "description": f"{generic_key} 49.99 Example Outfitters",
+        "amount": -49.99,
+    }]
+    merged = main.merge_rules(
+        {"keywords": {}, "merchant_map": {}, "patterns": []},
+        {
+            "keywords": {},
+            "merchant_map": {"example outfitters": "Personal: Clothing"},
+            "patterns": [{
+                "pattern": generic_key,
+                "category": "Personal: Clothing",
+                "priority": 3,
+            }],
+        },
+        transactions=transactions,
+    )
+
+    assert merged["merchant_map"] == {"example outfitters": "Personal: Clothing"}
+    assert merged["patterns"] == []
+    assert "generic bank wording" in capsys.readouterr().out
+
+
+def test_learn_requires_category_and_literal_fragment_evidence_but_keeps_existing_rules(
+        capsys):
+    transactions = [{
+        "category": "Personal: Clothing",
+        "description": "CARD PAYMENT Example Outfitters",
+        "amount": -50.0,
+    }]
+    existing = {
+        "keywords": {"manual review marker": "CHECK ME"},
+        "merchant_map": {},
+        "patterns": [],
+    }
+    merged = main.merge_rules(
+        existing,
+        {
+            "keywords": {
+                "example outfitters": "Transport",
+                "invented merchant": "Personal: Clothing",
+            },
+            "merchant_map": {},
+            "patterns": [],
+        },
+        transactions=transactions,
+    )
+
+    assert merged["keywords"] == {"manual review marker": "CHECK ME"}
+    log = capsys.readouterr().out
+    assert "category 'Transport' does not occur in the input corrections" in log
+    assert "that fragment does not occur in an example for 'Personal: Clothing'" in log
 
 
 def test_holder_only_rules_are_rejected_but_longer_phrases_survive(capsys):

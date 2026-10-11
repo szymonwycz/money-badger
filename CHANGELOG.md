@@ -18,10 +18,11 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
 - **Bulk import rejects unknown transaction types per row.** The valid remainder
   of the batch is still accepted, while the malformed row's hash stays unaccepted
   so the sender continues to report it instead of storing balance-corrupting data.
-- **Rule learning drops holder-name-only rules.** Optional `account_holders` in
-  `sync/config.json` protects unrelated transfers and invoices from a rule whose
-  entire keyword, merchant or pattern is just a holder's name; longer phrases
-  containing that name remain valid.
+- **Rule learning rejects unsafe generalizations before writing `rules.json`.** It
+  never learns CHECK ME, accepts only categories and literal fragments supported
+  by the input corrections, rejects malformed rules and generic card-operation
+  wording in English, Polish and other common European languages, and logs every
+  rejection. Optional `account_holders` still blocks holder-name-only rules.
 - **Two pipelines could run at once.** Both sync timers carry `Persistent=true`, so
   a machine that was off at the scheduled time replays the missed sync and the
   missed watchdog in the same second — and the watchdog, seeing no success marker

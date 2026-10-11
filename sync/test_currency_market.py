@@ -15,7 +15,7 @@ import main
 # may translate, normalize or re-case them — a rewritten name is a rejected rule.
 CATEGORIES = (
     "EXPENSES:\n  Wydatki: Żywność | Paliwo\n\nINCOME:\n  Wynagrodzenie",
-    {"Wydatki: Żywność", "Wydatki: Paliwo", "Wynagrodzenie"},
+    {"Wydatki: Żywność", "Wydatki: Paliwo", "Wynagrodzenie", "CHECK ME"},
 )
 
 
@@ -151,11 +151,22 @@ def test_category_names_reach_the_categorize_prompt_verbatim():
 
 
 def test_category_names_reach_the_learn_prompt_verbatim():
-    txs = [{"category": "Wydatki: Żywność", "description": "ŻABKA NANO 1234", "amount": -49.99}]
+    txs = [
+        {"category": "Wydatki: Żywność", "description": "ŻABKA NANO 1234",
+         "amount": -49.99},
+        {"category": "Wydatki: Paliwo", "description": "STACJA PALIW 5678",
+         "amount": -249.99},
+    ]
     prompt = capture_prompt(lambda: main.generate_new_rules(txs, "key"))["prompt"]
-    for name in sorted(CATEGORIES[1]):
-        assert f"  {name}" in prompt, name
-    assert "ŻABKA NANO 1234" in prompt
+    allowed = prompt.split(
+        "copied character for character — any other name means the rule is thrown away:\n",
+        1,
+    )[1].split("\n- NEVER", 1)[0]
+    assert allowed.splitlines() == ["  Wydatki: Paliwo", "  Wydatki: Żywność"]
+    assert "Wynagrodzenie" not in allowed
+    assert "CHECK ME" not in allowed
+    assert "ŻABKA NANO 1234" in prompt and "STACJA PALIW 5678" in prompt
+    assert "\\u017b" not in prompt
 
 
 if __name__ == "__main__":
