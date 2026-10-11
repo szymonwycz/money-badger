@@ -7,6 +7,7 @@ const state = {
   expanded: new Set(),
   activeCat: null,
   editingAccountId: null,
+  editingAccountHasIban: false,
   editingCategories: false,
 };
 
@@ -383,7 +384,8 @@ function renderBalanceBar(list) {
         <span class="balance-name">${esc(acct.name)}</span>
         <span class="balance-val" style="color:${color}">${fmtNum(acct.balance)}</span>
       `;
-      clickable(item, () => openAccountModal(acct.id, acct.name, acct.balance), `${acct.name} — correct balance`);
+      clickable(item, () => openAccountModal(acct.id, acct.name, acct.balance,
+        acct.has_iban, acct.iban_last4), `${acct.name} — correct balance`);
       elAssets.appendChild(item);
     } else {
       // bank or cash
@@ -392,17 +394,31 @@ function renderBalanceBar(list) {
         <span class="balance-name">${esc(acct.name)}</span>
         <span class="balance-val" style="color:${color}">${fmtNum(acct.balance)}</span>
       `;
-      clickable(item, () => openAccountModal(acct.id, acct.name, acct.balance), `${acct.name} — correct balance`);
+      clickable(item, () => openAccountModal(acct.id, acct.name, acct.balance,
+        acct.has_iban, acct.iban_last4), `${acct.name} — correct balance`);
       elAccounts.appendChild(item);
     }
   }
 }
 
-function openAccountModal(id, name, balance) {
+function openAccountModal(id, name, balance, hasIban, ibanLast4) {
   state.editingAccountId = id;
+  state.editingAccountHasIban = !!hasIban;
   document.getElementById('account-modal-title').textContent = `Balance: ${name}`;
   document.getElementById('account-balance-input').value     = balance || '';
+  const ibanBox = document.getElementById('account-iban-mapping');
+  ibanBox.style.display = hasIban ? '' : 'none';
+  document.getElementById('account-iban-last4').textContent = ibanLast4 || '';
   document.getElementById('account-modal').style.display     = 'flex';
+}
+
+async function clearAccountIban() {
+  if (!state.editingAccountHasIban) return;
+  if (!confirm('Forget this goal IBAN mapping? Existing transfers stay unchanged.')) return;
+  await api(`/api/accounts/${state.editingAccountId}/iban`, { method: 'DELETE' });
+  document.getElementById('account-modal').style.display = 'none';
+  await loadAccounts();
+  toast('IBAN mapping removed');
 }
 
 async function saveAccountBalance() {
@@ -464,6 +480,7 @@ document.getElementById('account-modal').addEventListener('click', e => {
     document.getElementById('account-modal').style.display = 'none';
 });
 document.getElementById('btn-account-save').addEventListener('click', saveAccountBalance);
+document.getElementById('btn-account-clear-iban').addEventListener('click', clearAccountIban);
 document.getElementById('btn-account-delete').addEventListener('click', deleteAccount);
 document.getElementById('account-balance-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') saveAccountBalance();

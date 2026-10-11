@@ -13,6 +13,9 @@ fetch() gets a real error instead of an HTML login page it can't parse.
 
 With `MB_PASSWORD_HASH` empty there is no authentication at all.
 
+Exception: `GET /api/accounts/iban-map` always requires `X-MB-Token`, because it
+returns full IBANs. A browser session is deliberately insufficient.
+
 Logins are per person and the budget is shared: an account decides who a
 transaction is attributed to, never what is visible. `MB_PASSWORD_HASH` becomes
 the first admin account on startup — named by `MB_ADMIN_USER`, default `admin` —
@@ -66,22 +69,26 @@ no author.
 |---|---|
 | `GET /api/transactions?month=&year=` | Month's transactions with resolved category names; transfer descriptions rendered as `→ TargetAccount`. `created_by` is the username that entered it, `null` for imports and for anything older than accounts |
 | `POST /api/transactions` | Manual add: `{date, amount, account?, description?, category_id?, tx_type?}`. Date accepts `DD/MM/YYYY`, `YYYY-MM-DD`, `DD.MM.YYYY`; stored as ISO. Attributed to the signed-in account |
-| `POST /api/transactions/bulk` | Pipeline import. Array of `{date, amount, account, account_to?, tx_type?, description?, category, hash}`. Hash-deduplicated (`INSERT OR IGNORE`). Resolves `category` against expense tree first, then income categories; the literal `CHECK ME` is never resolved. Income inserts credit `income_entries.received` |
+| `POST /api/transactions/bulk` | Pipeline import. Array of `{date, amount, account, account_to?, tx_type?, description?, category, hash, counterpart_iban?}`. Hash-deduplicated (`INSERT OR IGNORE`). A bad optional IBAN is stored as `NULL` without rejecting the row. Resolves `category` against expense tree first, then income categories; the literal `CHECK ME` is never resolved. Income inserts credit `income_entries.received` |
 | `PUT /api/transactions/<id>` | Partial update of `date/amount/account/description/category_id`. Category changes are logged to `corrections`; amount/month changes on income transactions adjust `received`. Invalid date → 400 |
 | `DELETE /api/transactions/<id>` | Deletes (rolls back `received` for income, removes its correction rows) |
 | `PUT /api/transactions/<id>/category` | Assign expense category (CHECK ME flow), logs a correction |
 | `PUT /api/transactions/<id>/income-category` | Assign income category, credits `received` (moves it if reassigned) |
-| `GET /api/transactions/unreviewed` | CHECK ME inbox, all-time: `{expenses: [...], income: [...]}` bucketed by `tx_type` |
+| `GET /api/transactions/unreviewed` | CHECK ME inbox, all-time: `{expenses, income, non_goal_ibans}`. Transaction IBAN metadata is redacted to `has_iban` + `iban_last4`; negative decisions expose only an id and last four digits |
 | `GET /api/transactions/unreviewed/count` | `{count}` — powers the nav badge |
+| `POST /api/transactions/<id>/goal-transfer` | Map an unresolved row's IBAN and turn that row into a transfer. Exactly one of `{account_id}` or `{new_account_name}`; the latter creates an `asset` at base balance 0. No correction row and no rewrite of earlier matching transactions |
+| `DELETE /api/non-goal-ibans/<id>` | Allow an IBAN filed as an ordinary CHECK ME transaction to enter goal discovery again; existing transactions stay unchanged |
 
 ## Accounts
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/accounts` | Accounts with **computed** balances (checkpoint + transactions since anchor) |
+| `GET /api/accounts` | Accounts with **computed** balances (checkpoint + transactions since anchor), plus redacted `has_iban` / `iban_last4` mapping state |
 | `POST /api/accounts` | `{name, type}` — type: `bank` / `cash` / `asset` |
 | `PUT /api/accounts/<id>` | `{balance}` — manual balance edit: writes a `Balance Adjust` audit row and re-anchors the checkpoint |
 | `DELETE /api/accounts/<id>` | |
+| `DELETE /api/accounts/<id>/iban` | Forget a goal mapping; existing transfers stay unchanged |
+| `GET /api/accounts/iban-map` | Token-only full state for sync: `{accounts: {full_iban: account_name}, non_goal_ibans: [full_iban]}`. Requires `X-MB-Token` even when login is disabled or a browser session exists |
 | `GET /api/accounts/last-dates` | `{account_name: "YYYY-MM-DD"}` last transaction date per account (pipeline resume fallback) |
 
 ## Income

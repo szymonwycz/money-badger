@@ -22,7 +22,7 @@ It runs on a Raspberry Pi.
 |---|---|
 | **EXPENSES** | Monthly budget per category: recurring amounts plus one-off entries with notes, live spent/remaining, account balances |
 | **INCOME** | Planned vs received per income source, copy this month's plan into the next |
-| **CHECK ME** | Review inbox for imported transactions nothing matched — the tab lights up when it has something |
+| **CHECK ME** | Review inbox for imported transactions nothing matched — categorize them, or map a bank-reported goal/subaccount IBAN to an asset account |
 | **TRANSACTIONS** | Full list: search, inline edit, manual add, transfers between accounts |
 | **LARGE EXPENSES** | Yearly one-off projects, with progress against the plan |
 | **OVERVIEW** | Year chart and a category × month matrix, plus CSV export |
@@ -51,6 +51,11 @@ Same code, and you can move up later without reinstalling.
 The rules improve on their own: every time you fix a category in CHECK ME, that
 correction is turned into a rule. After a few months most transactions never
 reach the LLM at all.
+
+Banks that expose savings goals or subaccounts under distinct IBANs can be taught
+from CHECK ME. Once mapped, deposits and withdrawals become transfers in either
+direction without depending on bank-specific wording. Pots or vaults without a
+separate counterparty IBAN cannot be mapped this way.
 
 ## Install
 
@@ -145,8 +150,8 @@ never travels over plain HTTP.
   registering an application, the consent flow, and what to put in `sync/config.json`.
 - **Teach it your bank's wording** — `filters` in `sync/config.json` decides what counts
   as a transfer between your own accounts, a cash withdrawal, or a card top-up whose
-  second leg must be ignored. The shipped example is in English; every bank words these
-  differently.
+  second leg must be ignored. `goal_transfer_titles` can flag an unknown goal IBAN for
+  review; every bank words these differently.
 - **Split a bundled payment** — one transfer that really pays three things becomes three
   categorized expenses via `split_rules`.
 - **Use a local model** — set `LLM_PROVIDER=openai` and `LLM_BASE_URL` to an Ollama or

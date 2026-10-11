@@ -32,7 +32,7 @@
             <th>DESCRIPTION</th>
             <th style="width:130px">CATEGORY</th>
             <th style="width:130px">SUBCATEGORY</th>
-            <th style="width:80px"></th>
+            <th style="width:190px"></th>
           </tr>
         </thead>
         <tbody id="check-me-expenses-body">
@@ -51,7 +51,7 @@
             <th style="width:110px">ACCOUNT</th>
             <th>DESCRIPTION</th>
             <th style="width:160px">INCOME CATEGORY</th>
-            <th style="width:80px"></th>
+            <th style="width:190px"></th>
           </tr>
         </thead>
         <tbody id="check-me-income-body">
@@ -59,7 +59,31 @@
         </tbody>
       </table>
     </div>
+
+    <div class="goal-decisions" id="goal-decisions" hidden>
+      <h2 class="section-label">GOAL DISCOVERY</h2>
+      <p>These IBANs were filed as ordinary transactions. Allow one again if that was a mistake.</p>
+      <div id="goal-decisions-list"></div>
+    </div>
   </section>
+
+  <div class="modal-overlay" id="goal-modal" style="display:none">
+    <div class="modal modal-small" role="dialog" aria-modal="true" aria-labelledby="goal-modal-title">
+      <div class="modal-header">
+        <h2 id="goal-modal-title">Transfer to goal</h2>
+        <button class="close-btn" id="goal-modal-close" type="button" aria-label="Close">×</button>
+      </div>
+      <p class="goal-iban-hint" id="goal-iban-hint"></p>
+      <label class="goal-field" for="goal-account-select">Goal account</label>
+      <select id="goal-account-select"></select>
+      <div id="goal-new-wrap" style="display:none">
+        <label class="goal-field" for="goal-new-name">New goal name</label>
+        <input id="goal-new-name" type="text" maxlength="100" autocomplete="off">
+        <p class="goal-create-hint">Creates an asset account with a starting balance of 0.</p>
+      </div>
+      <button class="btn btn-blue btn-full" id="goal-map-submit" type="button">Map transfer</button>
+    </div>
+  </div>
 
 </div>
 <script>window.MB = {{ settings|tojson }};</script>

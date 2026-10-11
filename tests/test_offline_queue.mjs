@@ -92,4 +92,12 @@ const balanceRes = await api('/api/accounts/7', { method: 'PUT', body: '{"balanc
 assert.deepEqual(balanceRes, { error: 'offline' });
 assert.equal(loadQueue().length, 0, 'a noQueue write must never land in the queue');
 
+// Goal mapping depends on the current server-side IBAN decisions and account list.
+// Replaying it later could target an account that was renamed, removed or remapped.
+const goalRes = await api('/api/transactions/42/goal-transfer', {
+  method: 'POST', body: '{"account_id":7}', noQueue: true,
+});
+assert.deepEqual(goalRes, { error: 'offline' });
+assert.equal(loadQueue().length, 0, 'offline goal mapping must not be queued');
+
 console.log('OK — all offline queue tests passed');

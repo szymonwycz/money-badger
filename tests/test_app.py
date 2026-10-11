@@ -207,6 +207,20 @@ def test_resolving_checkme_as_ordinary_remembers_non_goal_iban(client, db, monke
     state = client.get('/api/accounts/iban-map',
                        headers={'X-MB-Token': 'stage-2-secret'}).get_json()
     assert iban in state['non_goal_ibans']
+    browser_state = client.get('/api/transactions/unreviewed').get_json()
+    decision = next(d for d in browser_state['non_goal_ibans']
+                    if d['iban_last4'] == iban[-4:])
+    assert set(decision) == {'id', 'iban_last4'}
+    assert iban not in json.dumps(browser_state)
+
+    assert client.delete('/api/non-goal-ibans/999999').status_code == 404
+    decision_id = db.execute(
+        'SELECT rowid FROM non_goal_ibans WHERE iban=?', (iban,)).fetchone()['rowid']
+    assert client.delete(f'/api/non-goal-ibans/{decision_id}').status_code == 200
+    assert db.execute('SELECT 1 FROM non_goal_ibans WHERE iban=?', (iban,)).fetchone() is None
+    filed = db.execute('SELECT category_id, tx_type FROM transactions WHERE id=?',
+                       (tx['id'],)).fetchone()
+    assert filed['category_id'] == category['id'] and filed['tx_type'] == 'Expense'
 
 
 # ── bulk import ───────────────────────────────────────────────────────────────

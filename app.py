@@ -1258,7 +1258,15 @@ def get_unreviewed_transactions():
         items.append(item)
     expenses = [item for item in items if item['tx_type'] != 'Income']
     income   = [item for item in items if item['tx_type'] == 'Income']
-    return jsonify({'expenses': expenses, 'income': income})
+    non_goals = db.execute(
+        '''SELECT rowid AS id, substr(iban, -4) AS iban_last4
+             FROM non_goal_ibans ORDER BY created_at DESC, rowid DESC'''
+    ).fetchall()
+    return jsonify({
+        'expenses': expenses,
+        'income': income,
+        'non_goal_ibans': [dict(row) for row in non_goals],
+    })
 
 
 @app.route('/api/transactions/<int:tid>/goal-transfer', methods=['POST'])
@@ -1336,6 +1344,17 @@ def assign_goal_transfer(tid):
         'account': {'id': target_id, 'name': target_name,
                     'has_iban': True, 'iban_last4': iban[-4:]},
     })
+
+
+@app.route('/api/non-goal-ibans/<int:decision_id>', methods=['DELETE'])
+def delete_non_goal_iban(decision_id):
+    """Let discovery reconsider an IBAN; already-filed transactions stay unchanged."""
+    db = get_db()
+    cur = db.execute('DELETE FROM non_goal_ibans WHERE rowid=?', (decision_id,))
+    if not cur.rowcount:
+        return jsonify({'error': 'not found'}), 404
+    db.commit()
+    return jsonify({'ok': True})
 
 
 @app.route('/api/transactions/unreviewed/count')

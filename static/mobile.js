@@ -16,10 +16,10 @@ const state = {
 // is enough: whoever's back online first just replays their own writes, no
 // merging needed. A write the server actually rejects (validation error, not
 // a network failure) is dropped after one attempt rather than retried forever.
-// EXCEPTION: account balance correction (below, `noQueue: true`) is NOT queued
-// — the server computes it as a diff against the *current* live balance, so
-// replaying it late (after the other person's transactions landed) would
-// silently miscalculate. That one fails fast instead.
+// EXCEPTIONS: account balance corrections and goal-IBAN decisions (below,
+// `noQueue: true`) are NOT queued. Both depend on current server state, so a
+// delayed replay could compute the wrong diff or apply a stale mapping. They
+// fail fast and tell the user to reconnect instead.
 const QUEUE_KEY  = 'mb-offline-queue';
 const FAILED_KEY = 'mb-failed-writes';
 
@@ -327,7 +327,25 @@ function renderBalances() {
     const color   = a.balance < 0 ? 'var(--red)' : (isAsset ? 'var(--teal)' : 'var(--green)');
     const row = document.createElement('div');
     row.className = 'm-bal-row';
-    row.innerHTML = `<span>${esc(a.name)}</span><span class="val" style="color:${color}">${fmtNum(a.balance)}</span>`;
+    row.innerHTML = `
+      <span class="m-bal-main"><span class="m-bal-name">${esc(a.name)}</span>
+        ${a.has_iban ? `<small class="m-bal-iban">GOAL IBAN · ••••${esc(a.iban_last4)}</small>` : ''}
+      </span>
+      <span class="m-bal-right"><span class="val" style="color:${color}">${fmtNum(a.balance)}</span>
+        ${a.has_iban ? '<button type="button" class="m-bal-unmap" aria-label="Forget IBAN mapping">×</button>' : ''}
+      </span>`;
+    row.querySelector('.m-bal-unmap')?.addEventListener('click', async event => {
+      event.stopPropagation();
+      if (!confirm(`Forget the goal IBAN mapping for ${a.name}? Existing transfers stay unchanged.`)) return;
+      const res = await api(`/api/accounts/${a.id}/iban`, { method: 'DELETE', noQueue: true });
+      if (res?.error === 'offline') {
+        toast('Removing an IBAN mapping needs a live connection. Reconnect and try again.', 'error');
+        return;
+      }
+      if (res?.error) return;
+      toast('IBAN mapping removed');
+      loadAccounts();
+    });
     row.addEventListener('click', async () => {
       const input = prompt(`New balance for ${a.name}:`, a.balance);
       if (input === null) return;
@@ -498,17 +516,43 @@ function checkItem(tx, isIncome) {
     }
   }
 
+  const accountOptions = (state.accounts || [])
+    .filter(a => a.name !== tx.account)
+    .map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  const goalAction = tx.has_iban ? `
+    <button type="button" class="m-check-goal-toggle">TRANSFER TO GOAL
+      <small>IBAN ••••${esc(tx.iban_last4)}</small>
+    </button>
+    <div class="m-check-goal-form" hidden>
+      <label>Goal account</label>
+      <select class="m-check-goal-account" aria-label="Goal account">
+        <option value="">— choose an account —</option>
+        ${accountOptions}
+        <option value="__new__">＋ Create a new goal account…</option>
+      </select>
+      <div class="m-check-goal-new" hidden>
+        <label>New goal name</label>
+        <input type="text" maxlength="100" autocomplete="off">
+        <small>Creates an asset account with a starting balance of 0.</small>
+      </div>
+      <div class="m-check-actions">
+        <button type="button" class="m-check-goal-cancel">CANCEL</button>
+        <button type="button" class="m-check-goal-submit">MAP TRANSFER</button>
+      </div>
+    </div>` : '';
+
   item.innerHTML = `
     <div class="m-check-top">
       <span>${fmtDayMonth(tx.date)} · ${esc(tx.account || '—')}</span>
       <span class="amount" style="color:${txColor(tx)}">${fmtNum(Math.abs(tx.amount))}</span>
     </div>
     <div class="m-check-desc">${esc(fmtDesc(tx.description) || '—')}</div>
-    <select aria-label="Category for this transaction">${opts}</select>
+    <select class="m-check-category" aria-label="Category for this transaction">${opts}</select>
     <div class="m-check-actions"><button type="button" class="m-check-ignore">IGNORE</button></div>
+    ${goalAction}
   `;
 
-  item.querySelector('select').addEventListener('change', async e => {
+  item.querySelector('.m-check-category').addEventListener('change', async e => {
     const id = parseInt(e.target.value);
     if (!id) return;
     const url = isIncome
@@ -531,6 +575,54 @@ function checkItem(tx, isIncome) {
     refreshCheckBadge();
   });
 
+  const goalToggle = item.querySelector('.m-check-goal-toggle');
+  if (goalToggle) {
+    const form = item.querySelector('.m-check-goal-form');
+    const accountSelect = item.querySelector('.m-check-goal-account');
+    const newWrap = item.querySelector('.m-check-goal-new');
+    const newName = newWrap.querySelector('input');
+
+    goalToggle.addEventListener('click', () => {
+      form.hidden = !form.hidden;
+      if (!form.hidden) accountSelect.focus();
+    });
+    item.querySelector('.m-check-goal-cancel').addEventListener('click', () => {
+      form.hidden = true;
+      accountSelect.value = '';
+      newName.value = '';
+      newWrap.hidden = true;
+    });
+    accountSelect.addEventListener('change', () => {
+      newWrap.hidden = accountSelect.value !== '__new__';
+      if (!newWrap.hidden) newName.focus();
+    });
+    item.querySelector('.m-check-goal-submit').addEventListener('click', async () => {
+      const choice = accountSelect.value;
+      if (!choice) { toast('Choose an account or create a new one', 'error'); return; }
+      let body;
+      if (choice === '__new__') {
+        const name = newName.value.trim();
+        if (!name) { toast('Enter a name for the new goal account', 'error'); return; }
+        if (!confirm(`Create asset account “${name}” with a starting balance of 0?`)) return;
+        body = { new_account_name: name };
+      } else {
+        body = { account_id: Number(choice) };
+      }
+
+      const res = await api(`/api/transactions/${tx.id}/goal-transfer`, {
+        method: 'POST', body: JSON.stringify(body), noQueue: true,
+      });
+      if (res?.error === 'offline') {
+        toast('Transfer mapping needs a live connection. Reconnect and try again.', 'error');
+        return;
+      }
+      if (res?.error) return;
+      toast('Transfer mapped');
+      await Promise.all([loadCheckTab(), loadAccounts(), loadBudget()]);
+      refreshCheckBadge();
+    });
+  }
+
   return item;
 }
 
@@ -544,6 +636,32 @@ function renderCheckList() {
 
   for (const tx of expenses) el.appendChild(checkItem(tx, false));
   for (const tx of income)   el.appendChild(checkItem(tx, true));
+
+  const decisions = state.check?.non_goal_ibans || [];
+  const decisionsBox = document.getElementById('m-goal-decisions');
+  const decisionsList = document.getElementById('m-goal-decisions-list');
+  decisionsBox.hidden = !decisions.length;
+  decisionsList.innerHTML = '';
+  for (const decision of decisions) {
+    const row = document.createElement('div');
+    row.className = 'm-goal-decision';
+    row.innerHTML = `<span>NOT A GOAL · ••••${esc(decision.iban_last4)}</span>
+      <button type="button">ALLOW AGAIN</button>`;
+    row.querySelector('button').addEventListener('click', async () => {
+      if (!confirm('Allow this IBAN to be proposed as a goal again? Filed transactions stay unchanged.')) return;
+      const res = await api(`/api/non-goal-ibans/${decision.id}`, {
+        method: 'DELETE', noQueue: true,
+      });
+      if (res?.error === 'offline') {
+        toast('This change needs a live connection. Reconnect and try again.', 'error');
+        return;
+      }
+      if (res?.error) return;
+      toast('Goal discovery restored');
+      await loadCheckTab();
+    });
+    decisionsList.appendChild(row);
+  }
 }
 
 // ── transaction detail sheet ─────────────────────────────────────────────────

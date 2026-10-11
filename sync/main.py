@@ -809,10 +809,8 @@ def _load_goal_accounts() -> tuple[dict, set]:
         data = budget_client.get("/api/accounts/iban-map")
         if not isinstance(data, dict):
             raise ValueError("response is not an object")
-        # Accept the brief stage-2 response shape as well as the current state
-        # object, so a rolling deployment does not break a sync between restarts.
-        accounts = data.get("accounts", data)
-        excluded = data.get("non_goal_ibans", [])
+        accounts = data.get("accounts")
+        excluded = data.get("non_goal_ibans")
         if not isinstance(accounts, dict) or not isinstance(excluded, list):
             raise ValueError("response has invalid IBAN state")
         account_map = {

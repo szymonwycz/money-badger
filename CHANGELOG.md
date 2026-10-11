@@ -30,6 +30,14 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   `flock` on `.master_pi.lock` makes the second run exit quietly with status 0.
 
 ### Added
+- **Savings goals and subaccounts with distinct IBANs can be learned from CHECK ME.**
+  The import keeps a validated counterparty IBAN without changing transaction hashes;
+  bank-specific phrases or an account-holder match can propose an unknown IBAN, and
+  desktop/mobile can map it to an existing account or a new zero-balance asset. Later
+  deposits and withdrawals become title-independent transfers in either direction.
+  Full IBAN state is token-only, browser APIs show only the last four digits, false
+  discoveries stay dismissed until explicitly allowed again, and mappings can be
+  forgotten without rewriting earlier transactions.
 - **`install.sh` takes several sync times**, comma-separated, and renders one
   `OnCalendar` line per pass — for banks that post incoming transfers in settlement
   sessions rather than on arrival. The prompt suggests a pass a quarter of an hour

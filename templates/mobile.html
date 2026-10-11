@@ -95,6 +95,14 @@ body {
   padding: 13px 14px; margin-bottom: 8px; font-size: 16px;
 }
 .m-bal-row .val { font-weight: 700; }
+.m-bal-main { min-width: 0; }
+.m-bal-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-bal-iban { display: block; margin-top: 3px; color: var(--teal); font-size: 10px; font-weight: 700; }
+.m-bal-right { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
+.m-bal-unmap {
+  min-width: 34px; min-height: 34px; border: 1px solid var(--teal); border-radius: 8px;
+  background: none; color: var(--teal); font-size: 16px;
+}
 .m-bal-total { display: flex; justify-content: space-between; padding: 6px 14px 0; color: var(--text2); font-size: 13px; }
 
 /* ── BUDGET tab ── */
@@ -152,6 +160,32 @@ body {
 .m-check-actions button {
   flex: 1; min-height: 44px; background: none; border: 1px solid var(--border);
   border-radius: 8px; color: var(--text2); font-size: 13px; font-weight: 600;
+}
+.m-check-goal-toggle {
+  width: 100%; min-height: 44px; margin-top: 8px; background: none;
+  border: 1px solid var(--teal); border-radius: 8px; color: var(--teal);
+  font-size: 13px; font-weight: 700;
+}
+.m-check-goal-toggle small { display: block; margin-top: 2px; color: var(--text2); font-size: 11px; }
+.m-check-goal-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.m-check-goal-form label { display: block; margin: 0 0 6px; color: var(--text2); font-size: 12px; }
+.m-check-goal-new { margin-top: 10px; }
+.m-check-goal-new input {
+  box-sizing: border-box; width: 100%; min-height: 44px; background: var(--bg2);
+  border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+  font-size: 15px; padding: 0 12px;
+}
+.m-check-goal-new small { display: block; margin-top: 5px; color: var(--text2); line-height: 1.35; }
+.m-check-goal-submit { border-color: var(--teal) !important; color: var(--teal) !important; }
+.m-goal-decisions { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.m-goal-decisions > p { margin: 0 0 8px; color: var(--text2); font-size: 12px; line-height: 1.4; }
+.m-goal-decision {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  color: var(--text2); font-size: 12px; padding: 7px 0;
+}
+.m-goal-decision button {
+  min-height: 36px; border: 1px solid var(--teal); border-radius: 8px;
+  background: none; color: var(--teal); font-size: 11px; font-weight: 700;
 }
 
 /* ── TRANSACTIONS tab ── */
@@ -355,6 +389,10 @@ body {
       <span id="m-check-count">—</span>
     </div>
     <div id="m-check-list"></div>
+    <div class="m-goal-decisions" id="m-goal-decisions" hidden>
+      <p>IBANs filed as ordinary transactions. Allow one again if that was a mistake.</p>
+      <div id="m-goal-decisions-list"></div>
+    </div>
   </section>
 
 </main>

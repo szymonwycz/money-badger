@@ -24,7 +24,7 @@ over the file, so systemd or your shell can override it.
 |---|---|---|
 | `MB_PASSWORD_HASH` | empty | The login password, hashed. **Empty disables the login entirely** — every endpoint, including the ledger export and delete, becomes reachable by anyone who can connect. |
 | `SECRET_KEY` | random per process | Signs the session cookie. Leaving it empty logs everyone out on every restart, and on every gunicorn worker. |
-| `MB_API_TOKEN` | empty | Lets the sync pipeline call the API without a browser session. Only needed once a password is set. |
+| `MB_API_TOKEN` | empty | Lets the sync pipeline call the API without a browser session. It is always required for goal/subaccount IBAN mapping, even when login is disabled; the app and sync process must use the same value. |
 | `MB_HTTPS` | unset | Set to `1` when something in front of the app terminates TLS. Marks the session cookie `Secure`, so it is never sent over plain HTTP. Leave unset on a plain-http LAN install or the cookie will not arrive at all. |
 | `BUDGET_DB` | `budget.db` beside `app.py` | Database path. |
 
@@ -164,7 +164,9 @@ your own savings, not as new income.
 `account_holders` is optional. Put each holder's full name there as it appears
 in bank descriptions. Rule learning rejects a keyword, merchant or pattern that
 consists only of that name, because it would match unrelated transfers and
-invoices. More specific phrases containing the name remain allowed.
+invoices. More specific phrases containing the name remain allowed. A matching
+counterparty name is also a discovery signal for a transfer to an unknown goal
+IBAN; existing savings and own-account rules still take precedence.
 
 ### Filters
 
@@ -180,6 +182,7 @@ transaction title plus the counterparty name.
     {"match": ["card payment", "revolut"], "account": "Revolut"}
   ],
   "savings_withdrawal_titles": [],
+  "goal_transfer_titles": [],
   "skip_incoming_titles": ["top-up"]
 }
 ```
@@ -189,8 +192,35 @@ transaction title plus the counterparty name.
   withdrawal is really a transfer into your cash account, and "card payment" plus
   "revolut" together mean a top-up while neither does alone.
 - `savings_withdrawal_titles` — drawing on savings rather than earning.
+- `goal_transfer_titles` — optional bank-specific phrases used only to discover an
+  unknown goal/subaccount IBAN. Once mapped, the IBAN works without the phrase.
 - `skip_incoming_titles` — card top-ups book both legs, days apart and without an IBAN.
   Keep only the outgoing one or the money is counted twice.
+
+### Goals and subaccounts with their own IBAN
+
+When the bank reports a goal, pot or subaccount as a transfer counterparty with a
+distinct IBAN, Money Badger can map that IBAN to an `asset` account. Do **not** add
+goal IBANs to `own_ibans`: that list is also the list queried through Enable Banking,
+and a goal normally has no separate consent session.
+
+The first unknown IBAN goes to CHECK ME when either `goal_transfer_titles` matches
+the title or the counterparty matches `account_holders`. Choose **TRANSFER TO GOAL**
+and select an existing account, or create a new asset account at balance zero.
+Afterwards debits to that IBAN are transfers into the asset and credits from it are
+transfers back to the current account, regardless of title.
+
+Filing the candidate as an ordinary category or ignoring it records that IBAN as
+“not a goal”, so the same false positive does not keep returning. CHECK ME lists
+those decisions under **GOAL DISCOVERY**, where **ALLOW AGAIN** removes the decision.
+The accounts UI can likewise forget a positive mapping; neither action rewrites
+transactions already filed.
+
+This feature requires `MB_API_TOKEN` in both the web app and sync environment even
+when `MB_PASSWORD_HASH` is empty. Without it sync continues, but logs that saved
+positive and negative IBAN decisions are unavailable. Banks that do not expose a
+separate counterparty IBAN for their pots/vaults/subaccounts are not supported by
+this mechanism.
 
 ### Split rules
 

@@ -175,6 +175,13 @@ def test_goal_state_loader_reads_positive_and_negative_decisions(monkeypatch):
     assert main._load_goal_accounts() == ({GOAL: "Holiday"}, {SAVINGS})
 
 
+def test_goal_state_loader_rejects_unreleased_short_response_shape(monkeypatch, capsys):
+    monkeypatch.setattr(main.budget_client, "API_TOKEN", "configured")
+    monkeypatch.setattr(main.budget_client, "get", lambda *_args: {GOAL: "Holiday"})
+    assert main._load_goal_accounts() == ({}, set())
+    assert "invalid IBAN state" in capsys.readouterr().out
+
+
 def test_goal_withdrawal_csv_runs_from_asset_to_current_account():
     row = _filter(_tx(amount=25), goals={GOAL: "Holiday"})[0]
     row["category"] = ""
