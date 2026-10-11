@@ -48,6 +48,9 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   the installer into `deploy/schedule.py`, with `tests/test_schedule.py` over it.
 
 ### Changed
+- **The mobile stylesheet now lives in `static/mobile.css` and uses shared design
+  tokens.** The service worker precaches it, all controls meet the 44px touch target,
+  and the public-only goal and IBAN actions retain their teal treatment.
 - **Anthropic defaults moved to Claude Haiku 5.5 for categorization and Claude
   Sonnet 5.5 for learning.** Both use medium effort and a 16,000-token response
   budget. Thinking blocks are ignored while all text blocks are joined; refusals,

@@ -67,12 +67,17 @@ Imported at the top of `style.css` via `@import url('./design_tokens.css')`.
 | `--space-xl` | `24px` | Larger section gaps |
 | `--space-xxl` | `32px` | Reserved for major section breaks |
 
+Touch interaction: `--tap-min: 44px` is the minimum width and height of every
+interactive control in the PWA.
+
 ### Border Radius Scale
 
 | Token | Value | Used on |
 |---|---|---|
 | `--radius-sm` | `4px` | Small inline elements (toggle badges, select inputs in tables, close-btn) |
+| `--radius-compact` | `6px` | Compact mobile badges and links |
 | `--radius-md` | `8px` | Buttons, text inputs, month-nav buttons |
+| `--radius-control` | `10px` | Mobile cards and form controls |
 | `--radius-lg` | `12px` | Cards, panels, balance bar, le-year-header, apply bar |
 | `--radius-xl` | `16px` | Modals |
 
@@ -82,10 +87,16 @@ Imported at the top of `style.css` via `@import url('./design_tokens.css')`.
 |---|---|---|
 | `--fs-xs` | `10px` | Uppercase labels (column headers, sum-label, panel-title, balance-bar-label) |
 | `--fs-sm` | `11px` | Badges, secondary labels (acct-type, section-label, le-toggle, balance-name) |
+| `--fs-caption` | `12px` | Compact mobile secondary text |
 | `--fs-base` | `13px` | Body text, table rows, descriptions, notes |
 | `--fs-md` | `14px` | Values, interactive elements, buttons |
+| `--fs-control` | `15px` | Mobile controls and card headings |
 | `--fs-lg` | `16px` | Summary bar values (sum-val), modal titles |
+| `--fs-input` | `17px` | Mobile form inputs |
 | `--fs-xl` | `19px` | Month navigation label |
+| `--fs-icon` | `20px` | Mobile navigation icons |
+| `--fs-2xl` | `26px` | Large inline currency unit |
+| `--fs-display` | `44px` | Primary mobile amount input |
 
 **18px** (not tokenized): `le-year-label`, `le-title` — these are page-level headers with their own identity, intentionally between `--fs-lg` and `--fs-xl`.
 
@@ -446,12 +457,25 @@ context processor). Keep it on every new `<script>`/`<link>`.
 
 ## Mobile PWA (`/m`)
 
-`templates/mobile.html` carries its own stylesheet and does not use the desktop type,
-radius or spacing scales — it shares only `design_tokens.css` colours. Tabs:
-**ADD · BALANCES · TXNS · BUDGET · CHECK**.
+`templates/mobile.html` links `static/mobile.css` after `design_tokens.css`. Mobile uses
+the shared colour, type, radius and spacing tokens; touch-specific values such as
+`--tap-min`, `--radius-control` and the larger input/display type steps also live in
+`design_tokens.css`. Tabs: **ADD · BALANCES · TXNS · BUDGET · CHECK**.
 
 - Minimum tap target **44×44px**.
 - Amounts: `white-space: nowrap; flex-shrink: 0` next to any elastic text, or a long
   category name breaks the number in half.
 - Writes go through the offline queue in `mobile.js`; a write the server rejects lands
   in `mb-failed-writes` and shows a red badge — it is never silently dropped.
+- `static/sw.js` must precache `mobile.css`; bump its cache name whenever the shell list
+  changes.
+- Goal actions, goal decisions and IBAN unmapping use `--teal`; their touch targets
+  follow `--tap-min`, like the rest of the PWA.
+
+Intentional raw-value exceptions in `mobile.css` are component geometry rather than
+design choices: one/two-pixel borders and progress bars, safe-area offsets, fixed
+icon/badge sizes, the 52px transaction date column, 62px metadata indent, 90px tab-bar
+clearance, and widths that prevent the month label from moving. Component-local optical
+padding, gaps and margins that do not land on the 4px spacing scale stay literal to avoid
+changing the established layout. The `theme-color` meta value remains a literal
+`#1a2535` in `mobile.html` because HTML metadata cannot resolve CSS custom properties.

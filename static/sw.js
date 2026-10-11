@@ -5,8 +5,8 @@
 // two-second Wi-Fi drop mid-load served last week's balances with nothing in the UI
 // saying so. Wrong financial figures shown as current are worse than no figures.
 // Writes (POST/PUT/DELETE) never touch the cache; mobile.js queues those itself.
-const CACHE = 'money-badger-v3';
-const SHELL = ['/static/style.css', '/static/design_tokens.css',
+const CACHE = 'money-badger-v5';
+const SHELL = ['/static/style.css', '/static/design_tokens.css', '/static/mobile.css',
                '/static/badger.png', '/static/icon-192.png', '/static/icon-512.png',
                '/static/common.js', '/static/mobile.js', '/static/manifest.webmanifest'];
 

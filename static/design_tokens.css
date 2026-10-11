@@ -26,24 +26,35 @@
   --space-xl:  24px;
   --space-xxl: 32px;
 
+  /* Minimum interactive target on touch screens */
+  --tap-min: 44px;
+
   /* ==============================
      BORDER RADIUS
      ============================== */
   --radius-sm: 4px;
+  --radius-compact: 6px;
   --radius-md: 8px;
+  --radius-control: 10px;
   --radius-lg: 12px;
   --radius-xl: 16px;
 
   /* ==============================
      FONT SIZES
-     (hierarchy: xs < sm < base < md < lg < xl)
+     (ascending scale; semantic mobile steps fill the gaps)
      ============================== */
   --fs-xs:   10px;   /* uppercase labels, column headers */
   --fs-sm:   11px;   /* badges, secondary labels */
+  --fs-caption: 12px; /* compact secondary text */
   --fs-base: 13px;   /* body text, descriptions, table rows */
   --fs-md:   14px;   /* values, interactive elements */
+  --fs-control: 15px; /* mobile controls and card headings */
   --fs-lg:   16px;   /* summary bar values */
+  --fs-input:   17px; /* mobile form inputs */
   --fs-xl:   19px;   /* month navigation label */
+  --fs-icon:    20px; /* navigation icons */
+  --fs-2xl:     26px; /* large inline unit */
+  --fs-display: 44px; /* primary mobile amount input */
 
   /* ==============================
      SHADOWS
