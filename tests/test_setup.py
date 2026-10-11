@@ -41,6 +41,34 @@ def test_migrations_leave_the_database_empty(db):
     assert db.execute('SELECT count(*) FROM accounts').fetchone()[0] == 0
 
 
+def test_counterpart_iban_migration_upgrades_existing_database_idempotently(tmp_path):
+    path = tmp_path / 'existing.db'
+    conn = sqlite3.connect(path)
+    conn.execute('''CREATE TABLE schema_migrations (
+                        name TEXT PRIMARY KEY,
+                        applied_at TEXT NOT NULL)''')
+    conn.execute('CREATE TABLE transactions (id INTEGER PRIMARY KEY)')
+    conn.executemany(
+        'INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)',
+        [(name, '2032-10-09') for name, _fn in migrations.MIGRATIONS[:-1]],
+    )
+    conn.commit()
+    conn.close()
+
+    migrations.migrate(path)
+    migrations.migrate(path)
+
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(transactions)')}
+    applied = conn.execute(
+        "SELECT COUNT(*) FROM schema_migrations "
+        "WHERE name='0010_transaction_counterpart_iban'"
+    ).fetchone()[0]
+    conn.close()
+    assert 'counterpart_iban' in columns
+    assert applied == 1
+
+
 def test_pages_redirect_to_setup_before_it_is_done(client):
     res = client.get('/')
     assert res.status_code == 302

@@ -130,6 +130,83 @@ def test_bulk_check_me_literal_stays_unresolved(client, db):
     assert tx['category_id'] is None and tx['income_category_id'] is None
 
 
+def test_bulk_stores_canonical_full_counterpart_iban(client, db):
+    value = 'gb82 west 1234 5698 7654 32'
+    res = _bulk(client, [{
+        'date': '04/03/2030', 'amount': 78, 'account': 'Main account',
+        'category': 'Groceries', 'counterpart_iban': value,
+        'hash': 'h-counterpart-valid',
+    }])
+    row = db.execute(
+        "SELECT counterpart_iban FROM transactions WHERE source_hash='h-counterpart-valid'"
+    ).fetchone()
+    assert res['inserted'] == 1
+    assert row['counterpart_iban'] == 'GB82WEST12345698765432'
+
+
+def test_bulk_invalid_counterpart_iban_becomes_null_without_dropping_batch(client, db):
+    rows = [
+        {'date': '04/03/2030', 'amount': 79, 'account': 'Main account',
+         'category': 'Groceries', 'counterpart_iban': 'domestic-number-only',
+         'hash': 'h-counterpart-invalid'},
+        {'date': '04/03/2030', 'amount': 80, 'account': 'Main account',
+         'category': 'Groceries', 'counterpart_iban': 'DE89 3704 0044 0532 0130 00',
+         'hash': 'h-counterpart-after-invalid'},
+    ]
+    res = _bulk(client, rows)
+    stored = {
+        row['source_hash']: row['counterpart_iban']
+        for row in db.execute(
+            "SELECT source_hash, counterpart_iban FROM transactions "
+            "WHERE source_hash IN (?, ?)",
+            ('h-counterpart-invalid', 'h-counterpart-after-invalid'),
+        )
+    }
+    assert res['inserted'] == 2
+    assert set(res['accepted']) == {'h-counterpart-invalid', 'h-counterpart-after-invalid'}
+    assert stored == {
+        'h-counterpart-invalid': None,
+        'h-counterpart-after-invalid': 'DE89370400440532013000',
+    }
+
+
+def test_counterpart_iban_is_not_exposed_by_transaction_endpoints(client):
+    response = client.get('/api/transactions?month=3&year=2030')
+    assert response.status_code == 200
+    assert all('counterpart_iban' not in row for row in response.get_json())
+    export = client.get('/api/export/transactions.csv?month=3&year=2030')
+    export_text = export.get_data(as_text=True)
+    assert 'counterpart_iban' not in export_text.lower()
+    assert 'GB82WEST12345698765432' not in export_text
+
+
+def test_push_csv_iban_is_optional_and_does_not_change_hash(tmp_path):
+    with_iban = tmp_path / 'with-iban.csv'
+    with_iban.write_text(
+        'Date;Amount;Account;Amount received;Account (to);Balance;Category;'
+        'Description;Transaction Type;Agent;Check #;Class;\n'
+        '09/10/2032, 01:00;10.00;Main account;;;;Groceries;Synthetic row;'
+        'Expense;GB82WEST12345698765432;id-1;;\n',
+        encoding='utf-8',
+    )
+    legacy = tmp_path / 'legacy.csv'
+    legacy.write_text(
+        'Date;Amount;Account;Amount received;Account (to);Balance;Category;'
+        'Description;Transaction Type;Check #;Class;\n'
+        '09/10/2032, 01:00;10.00;Main account;;;;Groceries;Synthetic row;'
+        'Expense;id-1;;\n',
+        encoding='utf-8',
+    )
+
+    current = push_actuals.read_csv(with_iban)[0]
+    old = push_actuals.read_csv(legacy)[0]
+    expected = push_actuals.tx_hash(
+        '09/10/2032', 10.0, 'Main account', 'Synthetic row')
+    assert current['counterpart_iban'] == 'GB82WEST12345698765432'
+    assert old['counterpart_iban'] is None
+    assert current['hash'] == old['hash'] == expected
+
+
 # ── computed balances ─────────────────────────────────────────────────────────
 
 def test_expense_decreases_balance(client, db):

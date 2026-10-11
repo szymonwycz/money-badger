@@ -45,6 +45,27 @@ def test_plain_row_stays_compatible_and_carries_check_number():
     )
 
 
+def test_full_counterpart_iban_uses_agent_without_changing_csv_shape():
+    transaction = bank_tx("iban-id")
+    transaction["_counterpart_iban_full"] = "GB82WEST12345698765432"
+    parsed = list(csv.DictReader(csv_text(transaction).splitlines(), delimiter=";"))[0]
+
+    assert parsed["Agent"] == "GB82WEST12345698765432"
+    assert parsed["Check #"] == "iban-id"
+
+
+def test_counterpart_iban_does_not_change_check_number_deduplication(tmp_path):
+    path = tmp_path / "daily.csv"
+    first = bank_tx("same-id")
+    first["_counterpart_iban_full"] = "GB82WEST12345698765432"
+    replay = bank_tx("same-id")
+    replay["_counterpart_iban_full"] = "DE89370400440532013000"
+
+    assert sync_main._merge_daily_csv(path, csv_text(first)) == 1
+    assert sync_main._merge_daily_csv(path, csv_text(replay)) == 0
+    assert rows(path)[0]["Agent"] == "GB82WEST12345698765432"
+
+
 def test_semicolons_quotes_and_newlines_round_trip_without_shifting_columns(tmp_path):
     note = bank_tx("note")
     note["note"] = "first clause; second clause"

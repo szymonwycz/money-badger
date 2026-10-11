@@ -338,6 +338,13 @@ def _0009_users(db):
                'REFERENCES users(id) ON DELETE SET NULL')
 
 
+def _0010_transaction_counterpart_iban(db):
+    """Keep the bank-supplied counterparty IBAN as optional transaction metadata."""
+    columns = {r['name'] for r in db.execute('PRAGMA table_info(transactions)').fetchall()}
+    if 'counterpart_iban' not in columns:
+        db.execute('ALTER TABLE transactions ADD COLUMN counterpart_iban TEXT')
+
+
 MIGRATIONS = [
     ('0001_baseline', _0001_baseline),
     ('0002_indexes', _0002_indexes),
@@ -348,6 +355,7 @@ MIGRATIONS = [
     ('0007_calculator', _0007_calculator),
     ('0008_drop_lot_tables', _0008_drop_lot_tables),
     ('0009_users', _0009_users),
+    ('0010_transaction_counterpart_iban', _0010_transaction_counterpart_iban),
 ]
 
 

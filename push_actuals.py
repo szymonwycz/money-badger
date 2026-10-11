@@ -83,6 +83,7 @@ def read_csv(path):
             acct       = (row.get("Account") or "").strip()
             account_to = (row.get("Account (to)") or "").strip()
             desc       = (row.get("Description") or "").strip()
+            counterpart_iban = (row.get("Agent") or "").strip()
 
             h = tx_hash(date, amount, acct, desc)
             txs.append({
@@ -93,6 +94,7 @@ def read_csv(path):
                 "description": desc,
                 "category":    category,
                 "tx_type":     tx_type,
+                "counterpart_iban": counterpart_iban or None,
                 "hash":        h,
             })
     return txs

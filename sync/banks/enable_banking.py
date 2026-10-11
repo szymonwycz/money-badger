@@ -58,6 +58,16 @@ def normalize_iban(iban: str) -> str:
     return _iban.bare_iban(iban)
 
 
+def canonical_bank_iban(iban: str) -> str:
+    """Preserve the full IBAN supplied by the bank, normalized for storage.
+
+    Existing sync configuration deliberately uses bare IBANs, so normalize_iban()
+    keeps its old behavior.  This separate representation is metadata carried to
+    the app for future account mapping; it must not guess a country prefix.
+    """
+    return "".join((iban or "").split()).upper()
+
+
 # Both 429 (ASPSP daily quota) and 401 (expired/revoked EB session) are dead
 # ends that can't resolve within the same day — a 429 needs tomorrow's reset,
 # a 401 needs a manual `fetch-setup`. Neither improves by waiting 60s and
@@ -547,6 +557,7 @@ class EnableBankingFetcher:
             "title":            title.strip(),
             "counterpart":      counterpart.strip(),
             "counterpart_iban": normalize_iban(c_iban),
+            "_counterpart_iban_full": canonical_bank_iban(c_iban),
             "amount":           amount,
             "account_iban":     normalize_iban(account_iban),
             "_eb_id":           eb_id,

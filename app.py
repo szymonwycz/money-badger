@@ -6,6 +6,7 @@ import sqlite3
 import csv
 import io
 import os
+import re
 import time
 from datetime import datetime
 
@@ -353,6 +354,22 @@ def parse_int(value, field, lo=None, hi=None):
     if (lo is not None and out < lo) or (hi is not None and out > hi):
         raise BadInput(f'{field} must be between {lo} and {hi}')
     return out
+
+
+def normalize_iban(value, field='iban'):
+    """Return a checksum-valid full IBAN, or None for missing metadata."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if not isinstance(value, str):
+        raise BadInput(f'{field} must be a string')
+    iban = ''.join(value.split()).upper()
+    if not re.fullmatch(r'[A-Z]{2}\d{2}[A-Z0-9]{11,30}', iban):
+        raise BadInput(f'{field} must be a full IBAN with country prefix')
+    rearranged = iban[4:] + iban[:4]
+    digits = ''.join(str(ord(ch) - 55) if ch.isalpha() else ch for ch in rearranged)
+    if int(digits) % 97 != 1:
+        raise BadInput(f'{field} has an invalid checksum')
+    return iban
 
 
 def month_year_args():
@@ -1026,17 +1043,28 @@ def bulk_transactions():
                 app.logger.warning('bulk import: unparseable date, row skipped: %r', tx)
                 continue
             amount = parse_money(tx.get('amount'))
+            try:
+                counterpart_iban = normalize_iban(
+                    tx.get('counterpart_iban'), 'counterpart_iban')
+            except BadInput as exc:
+                # Connector identifiers are optional metadata. A malformed or
+                # non-IBAN value must never discard the financial row or abort
+                # the rest of its batch.
+                counterpart_iban = None
+                app.logger.warning(
+                    'bulk import: invalid counterparty IBAN stored as NULL: %s', exc)
 
             cur = db.execute(
                 '''INSERT OR IGNORE INTO transactions
                    (date, amount, account, account_to, tx_type, description,
-                    category_id, income_category_id, month, year, source_hash)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    category_id, income_category_id, month, year, source_hash,
+                    counterpart_iban)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (dt.strftime('%Y-%m-%d'), amount,
                  tx.get('account', ''), tx.get('account_to', ''),
                  row_type,
                  tx.get('description', ''), cat_id, income_cat_id,
-                 dt.month, dt.year, tx.get('hash'))
+                 dt.month, dt.year, tx.get('hash'), counterpart_iban)
             )
             if cur.rowcount and income_cat_id is not None:
                 bump_income_received(db, income_cat_id, dt.month, dt.year, amount)
