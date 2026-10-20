@@ -89,11 +89,12 @@ body {
 }
 .sum-block { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--space-lg); min-width: 0; }
 .sum-block-wide { flex: 1 1 200px; }   /* wraps to its own line instead of squeezing to 3 chars */
-.sum-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.8px; color: var(--text2); }
-.sum-val   { font-size: var(--fs-lg); font-weight: 600; color: var(--yellow); }
+.summary-status { display: contents; }
+.sum-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.8px; color: var(--text2); white-space: nowrap; }
+.sum-val   { font-size: var(--fs-lg); font-weight: 600; color: var(--yellow); white-space: nowrap; }
 .sum-income { color: var(--green); }
+.sum-negative { color: var(--red); }
 .sum-divider { width: 1px; background: var(--border); align-self: stretch; }
-#sum-narrative { font-size: var(--fs-base); color: var(--text2); padding-left: 20px; }
 
 /* ==========================================
    MONTH NAV
@@ -896,6 +897,10 @@ tr[tabindex]:focus-visible, div[tabindex]:focus-visible {
    .panel-box and .col-note were applied globally)
    ========================================== */
 @media (max-width: 760px) {
+  .app-logo { display: none; }
+  .summary-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .summary-bar .sum-block { padding: 0 var(--space-sm); min-width: 0; }
+  .summary-bar .sum-divider { display: none; }
   .calc-layout { grid-template-columns: 1fr; }
   .calc-lbl    { width: 100%; }
   .content     { grid-template-columns: 1fr; }

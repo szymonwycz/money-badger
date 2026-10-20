@@ -500,6 +500,25 @@ def bump_income_received(db, income_category_id, month, year, amount):
     )
 
 
+def income_progress(db, month, year):
+    """Return income totals without offsetting one source against another."""
+    row = db.execute(
+        '''SELECT
+             COALESCE(SUM(e.planned), 0) AS planned,
+             COALESCE(SUM(e.received), 0) AS received,
+             COALESCE(SUM(CASE WHEN e.planned > e.received
+                               THEN e.planned - e.received ELSE 0 END), 0) AS upcoming,
+             COALESCE(SUM(CASE WHEN e.received > e.planned
+                               THEN e.received - e.planned ELSE 0 END), 0) AS surplus
+           FROM income_entries e
+           JOIN income_categories c ON c.id=e.category_id
+           WHERE e.month=? AND e.year=?''',
+        (month, year),
+    ).fetchone()
+    return {key: round(row[key] or 0, 2)
+            for key in ('planned', 'received', 'upcoming', 'surplus')}
+
+
 # ── settings ──────────────────────────────────────────────────────────────────
 
 SETTING_DEFAULTS = {'currency': 'zł', 'locale': 'pl-PL'}
@@ -859,21 +878,22 @@ def api_budget():
     ).fetchall()
     spent = {r['category_id']: r['total'] for r in actuals}
 
-    income = db.execute(
-        'SELECT COALESCE(SUM(planned), 0) FROM income_entries WHERE month=? AND year=?',
-        (month, year)
-    ).fetchone()[0]
-    income_received = db.execute(
-        'SELECT COALESCE(SUM(received), 0) FROM income_entries WHERE month=? AND year=?',
-        (month, year)
-    ).fetchone()[0]
+    progress = income_progress(db, month, year)
+    income = progress['planned']
     if income == 0:
         row = db.execute('SELECT amount FROM monthly_income WHERE month=? AND year=?', (month, year)).fetchone()
         income = row['amount'] if row else 0
+        if income:
+            # Legacy monthly_income has no sources, so category-level progress is
+            # unavailable and the former net calculation remains the best fit.
+            progress['upcoming'] = round(max(0, income - progress['received']), 2)
+            progress['surplus'] = round(max(0, progress['received'] - income), 2)
 
     return jsonify({
         'additionals': by_cat,
-        'income_received': income_received,
+        'income_received': progress['received'],
+        'income_upcoming': progress['upcoming'],
+        'income_surplus': progress['surplus'],
         'spent': spent,
         'income': income,
     })

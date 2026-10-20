@@ -138,7 +138,10 @@ function computeSummary(state) {
   const income = state.budget.income || 0;
   // The account balance already reflects what has been spent, so it only has to
   // cover what is still left to spend, plus income expected but not yet landed.
-  const incomeUpcoming = Math.max(0, income - (state.budget.incomeReceived || 0));
+  // The API sums shortages per income source. Extra money from one source must
+  // not erase money that is still expected from another source.
+  const incomeUpcoming = state.budget.incomeUpcoming
+    ?? Math.max(0, income - (state.budget.incomeReceived || 0));
   const realAvailable  = (state.budget.availableCash || 0) + incomeUpcoming;
 
   return { totalPlanned, totalSpent, remainingPlanned, income, realAvailable };
@@ -164,15 +167,29 @@ function renderSummary(state) {
 
   const el = document.getElementById('sum-narrative');
   if (!el) return;
+  el.className = 'summary-status';
   if (s.totalSpent <= s.totalPlanned) {
     const toSpend = s.income > 0 ? s.income - s.totalSpent : s.totalPlanned - s.totalSpent;
-    el.innerHTML = `TO SPEND: <strong style="color:var(--green)">${fmtNum(toSpend)}</strong>`;
-  } else if (s.realAvailable >= s.remainingPlanned) {
-    const over = s.totalSpent - s.totalPlanned;
-    el.innerHTML = `Over budget by <strong style="color:var(--yellow)">${fmtNum(over)}</strong> — funds available`;
+    el.innerHTML = `
+      <div class="sum-block">
+        <span class="sum-label">TO SPEND</span>
+        <span class="sum-val sum-income">${fmtNum(toSpend)}</span>
+      </div>`;
   } else {
-    const shortage = s.remainingPlanned - s.realAvailable;
-    el.innerHTML = `SHORT <strong style="color:var(--red)">${fmtNum(shortage)}</strong> to cover expenses`;
+    const over = s.totalSpent - s.totalPlanned;
+    const buffer = s.realAvailable - s.remainingPlanned;
+    const bufferClass = buffer < 0 ? 'sum-negative' : 'sum-income';
+    const bufferSign = buffer < 0 ? '-' : '+';
+    el.innerHTML = `
+      <div class="sum-block">
+        <span class="sum-label">SPENT OVER PLAN</span>
+        <span class="sum-val">${fmtNum(over)}</span>
+      </div>
+      <div class="sum-divider"></div>
+      <div class="sum-block">
+        <span class="sum-label">BUFFER</span>
+        <span class="sum-val ${bufferClass}">${bufferSign} ${fmtNum(Math.abs(buffer))}</span>
+      </div>`;
   }
 }
 

@@ -552,6 +552,34 @@ def test_delete_income_category_in_use_is_clean_error(client, db):
 
 # ── budget writes and copy-next ───────────────────────────────────────────────
 
+def test_budget_income_progress_keeps_shortages_and_surpluses_separate(client, db):
+    """Extra income from one source must not hide another source's shortfall."""
+    year, month = 2048, 4
+    entries = [
+        ('Progress source A', 1000, 400),
+        ('Progress source B', 200, 500),
+        ('Progress source C', 0, 50),
+    ]
+    for order, (name, planned, received) in enumerate(entries, start=100):
+        category_id = db.execute(
+            'INSERT INTO income_categories (name, sort_order) VALUES (?, ?)',
+            (name, order),
+        ).lastrowid
+        db.execute(
+            '''INSERT INTO income_entries
+               (category_id, month, year, planned, received, note)
+               VALUES (?, ?, ?, ?, ?, '')''',
+            (category_id, month, year, planned, received),
+        )
+    db.commit()
+
+    budget = client.get(f'/api/budget?month={month}&year={year}').get_json()
+    assert budget['income'] == 1200
+    assert budget['income_received'] == 950
+    assert budget['income_upcoming'] == 600
+    assert budget['income_surplus'] == 350
+
+
 def test_basic_write_accepts_matching_expected_amount(client, db):
     cat = db.execute("SELECT id FROM categories WHERE name='Groceries' AND parent_id IS NULL").fetchone()
     client.post('/api/basic', json={

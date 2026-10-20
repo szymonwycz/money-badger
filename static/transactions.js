@@ -54,6 +54,9 @@ async function loadBudget() {
   state.budget.spent       = data.spent       || {};
   state.budget.income      = data.income      || 0;
   state.budget.incomeReceived = data.income_received || 0;
+  // Leave this undefined against an older server so shared summary math can
+  // fall back to the previous net calculation during a rolling update.
+  state.budget.incomeUpcoming = data.income_upcoming;
   state.budget.availableCash  = availableCashFrom(state.accounts);
 }
 

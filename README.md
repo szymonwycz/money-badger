@@ -193,6 +193,7 @@ transactions, why one gunicorn worker, and which invariants the tests protect.
 venv/bin/pip install -r requirements-dev.txt
 venv/bin/pytest tests/ sync/ -q      # ~130 tests, throwaway database
 node tests/test_offline_queue.mjs    # the PWA's offline write queue
+node tests/test_summary.mjs          # summary-bar math, copy and responsive layout
 
 venv/bin/playwright install chromium
 BASE=http://127.0.0.1:5055 python3 tests/ui_smoke.py   # against a running instance

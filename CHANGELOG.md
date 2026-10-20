@@ -4,6 +4,13 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
 
 ## Unreleased
 
+### Added
+- **Budget summaries keep expected income and extra income separate per source.**
+  EXPENSES and TRANSACTIONS include every source's still-expected amount in
+  available funds without letting an overpaid source cancel it. Summary bars use
+  compact metric blocks, including signed BUFFER and EXTRA RECEIVED, and become a
+  two-column grid on narrow screens.
+
 ### Fixed
 - **Intraday bank passes now fetch the open current day safely.** Every pass asks
   through today with a two-day overlap, while the durable checkpoint is clamped

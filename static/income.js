@@ -21,27 +21,25 @@ async function loadAccounts() {
 function updateSummary() {
   const totalPlanned  = state.entries.reduce((s, e) => s + (e.planned  || 0), 0);
   const totalReceived = state.entries.reduce((s, e) => s + (e.received || 0), 0);
-  const remaining     = totalPlanned - totalReceived;
+  const remaining = state.entries.reduce(
+    (s, e) => s + Math.max(0, (e.planned || 0) - (e.received || 0)), 0);
+  const surplus = state.entries.reduce(
+    (s, e) => s + Math.max(0, (e.received || 0) - (e.planned || 0)), 0);
 
   document.getElementById('sum-planned').textContent  = fmtNum(totalPlanned);
   document.getElementById('sum-received').textContent = fmtNum(totalReceived);
 
   const remEl = document.getElementById('sum-remaining');
-  remEl.textContent = remaining > 0 ? `short ${fmtNum(remaining)}`
-                    : remaining < 0 ? `over ${fmtNum(-remaining)}` : fmtNum(0);
+  remEl.textContent = fmtNum(remaining);
   remEl.style.color = remaining > 0 ? 'var(--yellow)' : 'var(--green)';
 
   const narEl = document.getElementById('sum-narrative');
-  if (totalPlanned === 0) {
-    narEl.innerHTML = '<span style="color:var(--text2)">No plan for this month</span>';
-  } else if (totalReceived >= totalPlanned) {
-    const extra = totalReceived - totalPlanned;
-    narEl.innerHTML = extra > 0
-      ? `Surplus: <strong style="color:var(--green)">${fmtNum(extra)}</strong>`
-      : `<strong style="color:var(--green)">Plan completed ✓</strong>`;
-  } else {
-    narEl.innerHTML = '';
-  }
+  narEl.className = 'summary-status';
+  narEl.innerHTML = `
+    <div class="sum-block">
+      <span class="sum-label">EXTRA RECEIVED</span>
+      <span class="sum-val sum-income">${fmtNum(surplus)}</span>
+    </div>`;
 }
 
 // ── table ────────────────────────────────────────────────────────────────────
