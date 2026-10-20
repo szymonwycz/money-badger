@@ -132,7 +132,7 @@ class EnableBankingFetcher:
         # IBANs skipped by the last fetch() due to a real failure (rate limit,
         # expired session, missing config) — NOT "already up to date". The
         # caller uses this to avoid reporting a run as successful when some
-        # accounts got no fetch attempt at all (see cmd_fetch in main.py).
+        # accounts got no usable response (see cmd_fetch in main.py).
         self.last_skipped: list[str] = []
         # Skip reason per bare IBAN, so the Telegram notification in master_pi.py
         # can say why. Kept alongside last_skipped, which stays a plain list[str] —
@@ -411,32 +411,43 @@ class EnableBankingFetcher:
 
             print(f"  Fetching {bare_iban[-10:]}... (from {date_from} to {today})")
             params = {"date_from": date_from, "date_to": today}
-            r = requests.get(
-                f"{EB_BASE}/accounts/{account_id}/transactions",
-                headers=self._headers(),
-                params=params,
-                timeout=60,
-            )
+            try:
+                r = requests.get(
+                    f"{EB_BASE}/accounts/{account_id}/transactions",
+                    headers=self._headers(),
+                    params=params,
+                    timeout=60,
+                )
 
-            if r.status_code == 429:
-                # See the comment in get_balances() — this is the ASPSP daily
-                # limit, not throttling. Retrying in 60s only spends another call from the
-                # same quota, so skip this account and try the rest.
-                print(f"  [{bare_iban[-10:]}...] ASPSP limit spent for today — try in a few hours or tomorrow")
-                _mark_dead_today(self.state_file, state, full_iban, 429)
+                if r.status_code == 429:
+                    # See the comment in get_balances() — this is the ASPSP daily
+                    # limit, not throttling. Retrying in 60s only spends another call from the
+                    # same quota, so skip this account and try the rest.
+                    print(f"  [{bare_iban[-10:]}...] ASPSP limit spent for today — try in a few hours or tomorrow")
+                    _mark_dead_today(self.state_file, state, full_iban, 429)
+                    self.last_skipped.append(bare_iban)
+                    self.skip_reasons[bare_iban] = "ASPSP daily limit reached"
+                    continue
+
+                if r.status_code == 401:
+                    print(f"  Session expired — run: python main.py fetch-setup (account {bare_iban[-10:]}...)")
+                    _mark_dead_today(self.state_file, state, full_iban, 401)
+                    self.last_skipped.append(bare_iban)
+                    self.skip_reasons[bare_iban] = "session expired (401)"
+                    continue
+
+                r.raise_for_status()
+                body = r.json()
+            except requests.RequestException as exc:
+                # One account must not discard usable responses from the others.
+                # Report it through the normal skipped-account channel so the
+                # caller can checkpoint successes and retry only this account.
+                reason = str(exc)[:150] or type(exc).__name__
+                print(f"  [{bare_iban[-10:]}...] transaction fetch failed: {reason}")
                 self.last_skipped.append(bare_iban)
-                self.skip_reasons[bare_iban] = "ASPSP daily limit reached"
+                self.skip_reasons[bare_iban] = reason
                 continue
 
-            if r.status_code == 401:
-                print(f"  Session expired — run: python main.py fetch-setup (account {bare_iban[-10:]}...)")
-                _mark_dead_today(self.state_file, state, full_iban, 401)
-                self.last_skipped.append(bare_iban)
-                self.skip_reasons[bare_iban] = "session expired (401)"
-                continue
-
-            r.raise_for_status()
-            body = r.json()
             raw_txs = body.get("transactions", [])
             _dump_raw_pull(self.state_file, bare_iban, date_from, today, body)
             print(f"  → {len(raw_txs)} transactions")

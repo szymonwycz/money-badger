@@ -12,6 +12,11 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   two-column grid on narrow screens.
 
 ### Fixed
+- **One failed bank account no longer aborts the whole fetch.** Successful
+  accounts are still processed and checkpointed, while the failed account and
+  reason stay in the run summary. An immediate retry queries only accounts that
+  failed in the fresh summary; if no fresh summary exists, it safely falls back
+  to the full fetch. Telegram continues to describe the complete run.
 - **Intraday bank passes now fetch the open current day safely.** Every pass asks
   through today with a two-day overlap, while the durable checkpoint is clamped
   to yesterday. Explicit `PDNG` rows wait until booked; missing/unknown statuses

@@ -879,6 +879,23 @@ def _make_fetch_summary(accounts, failed_accounts, failed_reasons,
     }
 
 
+def _retry_ibans_from_summary(ibans: list[str], account_names: dict,
+                              summary: dict) -> tuple[list[str], list[str]]:
+    """Resolve failed account names from a summary back to configured IBANs.
+
+    Full IBANs deliberately stay out of the summary and Telegram payload. The
+    configured account name is the existing local join key; last four digits are
+    the fallback for accounts without an explicit name.
+    """
+    failed_names = set(summary.get("failed_accounts") or [])
+    selected = [
+        iban for iban in ibans
+        if account_names.get(iban, iban[-4:]) in failed_names
+    ]
+    resolved_names = {account_names.get(iban, iban[-4:]) for iban in selected}
+    return selected, sorted(failed_names - resolved_names)
+
+
 def cmd_fetch(args):
     env = load_env()
     cfg = load_config()
@@ -910,6 +927,31 @@ def cmd_fetch(args):
         print("No own_ibans in config.json.")
         sys.exit(1)
 
+    # An immediate master_pi retry is narrower than a normal scheduled run: it
+    # asks only for accounts that failed in the summary just written by the first
+    # subprocess. Successful account details are retained so the final Telegram
+    # message still describes the complete run.
+    retry_summary = None
+    unresolved_retry_accounts = []
+    summary_path = BASE_DIR.parent / ".last_fetch_summary.json"
+    if getattr(args, "retry_failed", False):
+        try:
+            candidate = json.loads(summary_path.read_text())
+        except Exception as exc:
+            print(f"Cannot read the summary for targeted retry: {exc}")
+            sys.exit(1)
+        if candidate.get("date") != date.today().isoformat():
+            print("The targeted-retry summary does not come from today's run.")
+            sys.exit(1)
+        ibans, unresolved_retry_accounts = _retry_ibans_from_summary(
+            ibans, account_names, candidate)
+        if not ibans:
+            print("The summary contains no accounts that can be safely retried.")
+            sys.exit(1)
+        retry_summary = candidate
+        print("Targeted retry only for: " + ", ".join(
+            account_names.get(iban, iban[-4:]) for iban in ibans))
+
     # Fallback for accounts with no local last_fetch state (after a reset or a
     # migration, say): instead of cutting straight back to cap_date, resume from
     # the last transaction the app has stored for that account.
@@ -933,36 +975,45 @@ def cmd_fetch(args):
     # Accounts fetch() itself gave up on (rate limit, expired session, missing
     # config). Window-cap warnings stay separate: retrying cannot recover dates
     # outside days_back, so they notify without failing the run.
-    # These never got a fetch attempt at all, so they must NOT count toward a
+    # These never got a usable response, so they must NOT count toward a
     # successful run, or the watchdog stands down while their data goes stale.
     skipped_ibans = list(getattr(fetcher, "last_skipped", []))
     skip_reasons = getattr(fetcher, "skip_reasons", {})
-    failed_accounts = [account_names.get(iban, iban[-4:]) for iban in skipped_ibans]
+    failed_accounts = list(unresolved_retry_accounts)
+    failed_accounts.extend(account_names.get(iban, iban[-4:]) for iban in skipped_ibans)
     # Reason per account name — this is what ends up in the Telegram message
     # (master_pi.py), so it stays short enough to read on a phone.
     failed_reasons = {
+        name: (retry_summary.get("failed_reasons", {}).get(name, "account no longer in config")
+               if retry_summary else "account no longer in config")
+        for name in unresolved_retry_accounts
+    }
+    failed_reasons.update({
         account_names.get(iban, iban[-4:]): skip_reasons.get(iban, "unknown reason")
         for iban in skipped_ibans
-    }
-    window_warnings = {
+    })
+    window_warnings = dict((retry_summary or {}).get("window_warnings") or {})
+    window_warnings.update({
         account_names.get(iban, iban[-4:]): reason
         for iban, reason in getattr(fetcher, "window_warnings", {}).items()
-    }
-    accounts_out = []  # for .last_fetch_summary.json (master_pi.py -> Telegram)
+    })
+    accounts_out = list((retry_summary or {}).get("accounts") or [])
+    retried_names = {account_names.get(iban, iban[-4:]) for iban in ibans}
+    accounts_out = [account for account in accounts_out
+                    if account.get("name") not in retried_names]
 
     def _write_summary():
         if args.dry_run:
             return
         summary = _make_fetch_summary(
             accounts_out, failed_accounts, failed_reasons, window_warnings)
-        (BASE_DIR.parent / ".last_fetch_summary.json").write_text(
-            json.dumps(summary, ensure_ascii=False))
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False))
 
     if not fetched:
         _write_summary()
         if failed_accounts:
-            print(f"\n❌ SYNC FAILED — {len(failed_accounts)} account(s) never even got a fetch "
-                  f"attempt: {', '.join(failed_accounts)}. See the errors above.")
+            print(f"\n❌ SYNC FAILED — {len(failed_accounts)} account(s) had no usable response: "
+                  f"{', '.join(failed_accounts)}. See the errors above.")
             sys.exit(1)
         print("No transactions (check that the sessions are still valid: python main.py fetch-setup).")
         return
@@ -1042,8 +1093,8 @@ def cmd_fetch(args):
     _write_summary()
 
     if failed_accounts:
-        print(f"\n❌ SYNC PARTIALLY FAILED — {len(failed_accounts)} account(s) errored or never "
-              f"got a fetch attempt: {', '.join(failed_accounts)}. See the errors above.")
+        print(f"\n❌ SYNC PARTIALLY FAILED — {len(failed_accounts)} account(s) errored or had "
+              f"no usable response: {', '.join(failed_accounts)}. See the errors above.")
     else:
         print(f"\n✅ All accounts ({len(fetched)}) processed successfully.")
 
@@ -1470,6 +1521,7 @@ def main():
     p_fetch = sub.add_parser("fetch", help="pull transactions through the Enable Banking API")
     p_fetch.add_argument("--days", type=int, help="how many days back (default: config.json, or 30)")
     p_fetch.add_argument("--dry-run", action="store_true", help="do not write any files")
+    p_fetch.add_argument("--retry-failed", action="store_true", help=argparse.SUPPRESS)
 
     p_fetch_setup = sub.add_parser("fetch-setup", help="one-time account authorization in Enable Banking")
     p_fetch_setup.add_argument("ibans", nargs="*", help="IBANs to authorize (default: from config.json)")

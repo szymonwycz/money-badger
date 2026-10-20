@@ -74,6 +74,25 @@ def _only_non_retryable_failures() -> bool:
     return bool(reasons) and all(r in NON_RETRYABLE_REASONS for r in reasons.values())
 
 
+def _summary_version() -> int | None:
+    try:
+        return SUMMARY_FILE.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _fresh_failed_summary(previous_version: int | None) -> bool:
+    """Whether the just-finished fetch wrote a usable targeted-retry scope."""
+    try:
+        summary = json.loads(SUMMARY_FILE.read_text())
+        current_version = SUMMARY_FILE.stat().st_mtime_ns
+    except Exception:
+        return False
+    return (current_version != previous_version
+            and summary.get("date") == time.strftime("%Y-%m-%d")
+            and bool(summary.get("failed_accounts")))
+
+
 def acquire_lock():
     """The lock handle, or None when a run is already in progress.
 
@@ -145,16 +164,19 @@ def run_fetch(dry_run: bool = False) -> bool:
     if dry_run:
         cmd.append("--dry-run")
 
+    previous_summary_version = _summary_version()
     result = subprocess.run(cmd, cwd=str(SYNC_SCRIPT.parent))
     if result.returncode != 0:
-        if _only_non_retryable_failures():
+        fresh_failed_summary = _fresh_failed_summary(previous_summary_version)
+        if fresh_failed_summary and _only_non_retryable_failures():
             print("\nEnable Banking fetch failed — ASPSP limit or session only, nothing"
                   " transient, so a retry would spend another call for nothing."
                   " Leaving it to the next watchdog hop.")
             return False
         print("\nWARNING: Enable Banking fetch failed — retrying in 60s...")
         time.sleep(60)
-        result = subprocess.run(cmd, cwd=str(SYNC_SCRIPT.parent))
+        retry_cmd = [*cmd, "--retry-failed"] if fresh_failed_summary else cmd
+        result = subprocess.run(retry_cmd, cwd=str(SYNC_SCRIPT.parent))
         if result.returncode != 0:
             print("\n❌ Enable Banking fetch failed (2/2) — some or all accounts were"
                   " not processed. Their checkpoints were not advanced, so nothing is"

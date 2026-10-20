@@ -15,6 +15,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent))
 import master_pi
@@ -56,6 +57,66 @@ def test_unknown_failure_reason_allows_retry():
 def test_missing_summary_file_allows_retry():
     master_pi.SUMMARY_FILE = Path(tempfile.mkdtemp()) / "missing.json"
     assert master_pi._only_non_retryable_failures() is False
+
+
+def test_run_fetch_targets_only_failed_accounts_on_retry(monkeypatch, tmp_path):
+    """A fresh per-account summary narrows the second subprocess instead of
+    repeating the complete bank fetch."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"enable_banking": {"app_id": "offline"}}))
+    summary = tmp_path / ".last_fetch_summary.json"
+    monkeypatch.setattr(master_pi, "SYNC_CFG", cfg)
+    monkeypatch.setattr(master_pi, "SUMMARY_FILE", summary)
+    commands = []
+
+    def fake_run(cmd, cwd):
+        commands.append(cmd)
+        if len(commands) == 1:
+            summary.write_text(json.dumps({
+                "date": master_pi.time.strftime("%Y-%m-%d"),
+                "accounts": [
+                    {"name": f"Account {index}", "transactions": []}
+                    for index in range(1, 5)
+                ],
+                "failed_accounts": ["Account 5"],
+                "failed_reasons": {"Account 5": "400 Client Error"},
+            }))
+            return SimpleNamespace(returncode=1)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(master_pi.subprocess, "run", fake_run)
+    monkeypatch.setattr(master_pi.time, "sleep", lambda _seconds: None)
+
+    assert master_pi.run_fetch() is True
+    assert len(commands) == 2
+    assert "--retry-failed" not in commands[0]
+    assert commands[1] == [*commands[0], "--retry-failed"]
+
+
+def test_run_fetch_falls_back_to_full_retry_without_fresh_summary(
+        monkeypatch, tmp_path):
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"enable_banking": {"app_id": "offline"}}))
+    summary = tmp_path / ".last_fetch_summary.json"
+    summary.write_text(json.dumps({
+        "date": master_pi.time.strftime("%Y-%m-%d"),
+        "failed_accounts": ["Old account"],
+        "failed_reasons": {"Old account": "ASPSP daily limit reached"},
+    }))
+    monkeypatch.setattr(master_pi, "SYNC_CFG", cfg)
+    monkeypatch.setattr(master_pi, "SUMMARY_FILE", summary)
+    commands = []
+
+    def fake_run(cmd, cwd):
+        commands.append(cmd)
+        return SimpleNamespace(returncode=1 if len(commands) == 1 else 0)
+
+    monkeypatch.setattr(master_pi.subprocess, "run", fake_run)
+    monkeypatch.setattr(master_pi.time, "sleep", lambda _seconds: None)
+
+    assert master_pi.run_fetch() is True
+    assert len(commands) == 2
+    assert commands[1] == commands[0]
 
 
 if __name__ == "__main__":
