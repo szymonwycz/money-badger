@@ -85,6 +85,7 @@ MAX_EMAIL_CHARS = 12000
 DEFAULT_SHOPS = {"Allegro": {"folder": "Allegro"}}
 DEFAULT_IMAP_HOST = "imap.gmail.com"
 DEFAULT_IMAP_PORT = 993
+IMAP_TIMEOUT_SECONDS = 30
 
 MONTHS = {
     "stycznia": 1, "lutego": 2, "marca": 3, "kwietnia": 4, "maja": 5, "czerwca": 6,
@@ -401,37 +402,57 @@ def fetch_shop_emails(mbox: dict, shops: dict) -> list[tuple[str, str]]:
     subjects or senders, and mail forwarded from a second account is picked up
     too. The folder is opened directly rather than INBOX: a Gmail filter that
     labels usually archives as well, so searching INBOX missed exactly those."""
-    imap = imaplib.IMAP4_SSL(mbox["host"], mbox["port"])
-    imap.login(mbox["address"], mbox["password"])
-    since = (datetime.now() - timedelta(days=30)).strftime("%d-%b-%Y")
-    out = []
-    for shop, shop_cfg in shops.items():
-        folder = (shop_cfg or {}).get("folder", shop)
-        try:
-            typ, _ = imap.select(f'"{folder}"')
-        except imaplib.IMAP4.error:
-            typ = "NO"
-        if typ != "OK":
-            # A shop enabled before its mail rule exists must not take the other
-            # shops down with it.
-            print(f"  [{shop.lower()}] no mail folder \"{folder}\" — skipping this shop")
-            continue
-        typ, data = imap.search(None, "SINCE", since)
-        if typ != "OK":
-            continue
-        found = 0
-        for eid in data[0].split():
-            typ, msg_data = imap.fetch(eid, "(RFC822)")
-            if typ != "OK" or not msg_data or not msg_data[0]:
+    imap = None
+    completed = False
+    try:
+        # The timeout stays on the SSL socket, bounding login, folder selection,
+        # searches and message reads as well as the initial connection.
+        imap = imaplib.IMAP4_SSL(
+            mbox["host"], mbox["port"], timeout=IMAP_TIMEOUT_SECONDS)
+        imap.login(mbox["address"], mbox["password"])
+        since = (datetime.now() - timedelta(days=30)).strftime("%d-%b-%Y")
+        out = []
+        for shop, shop_cfg in shops.items():
+            folder = (shop_cfg or {}).get("folder", shop)
+            try:
+                typ, _ = imap.select(f'"{folder}"')
+            except imaplib.IMAP4.error:
+                typ = "NO"
+            if typ != "OK":
+                # A shop enabled before its mail rule exists must not take the other
+                # shops down with it.
+                print(f"  [{shop.lower()}] no mail folder \"{folder}\" — skipping this shop")
                 continue
-            msg = email.message_from_bytes(msg_data[0][1])
-            text = extract_plaintext(msg)
-            if text:
-                out.append((shop, text))
-                found += 1
-        print(f"  [{shop.lower()}] {found} emails in folder \"{folder}\".")
-    imap.logout()
-    return out
+            typ, data = imap.search(None, "SINCE", since)
+            if typ != "OK":
+                continue
+            found = 0
+            for eid in data[0].split():
+                typ, msg_data = imap.fetch(eid, "(RFC822)")
+                if typ != "OK" or not msg_data or not msg_data[0]:
+                    continue
+                msg = email.message_from_bytes(msg_data[0][1])
+                text = extract_plaintext(msg)
+                if text:
+                    out.append((shop, text))
+                    found += 1
+            print(f"  [{shop.lower()}] {found} emails in folder \"{folder}\".")
+        completed = True
+        return out
+    finally:
+        if imap is not None:
+            try:
+                # LOGOUT is useful after a healthy exchange. After a socket
+                # timeout, avoid another protocol wait and close immediately.
+                if completed:
+                    imap.logout()
+                else:
+                    imap.shutdown()
+            except (imaplib.IMAP4.error, OSError):
+                try:
+                    imap.shutdown()
+                except (imaplib.IMAP4.error, OSError):
+                    pass
 
 
 def get_json(path: str):

@@ -85,7 +85,7 @@ def check_stale_fetch(cfg: dict) -> list[str]:
             continue
         days = (today - date.fromisoformat(last)).days
         if days >= threshold:
-            findings.append(f"{name}: last successful fetch {days} days ago ({last})")
+            findings.append(f"{name}: checkpoint closed through {last} ({days} days ago)")
     return findings
 
 

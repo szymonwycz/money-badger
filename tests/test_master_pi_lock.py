@@ -9,6 +9,7 @@ and the watchdog starts a second pipeline while the first is still running:
 a double bank fetch against one daily quota, and two writers on the
 order-matching state.
 """
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -25,7 +26,12 @@ def test_second_run_is_refused_while_first_holds_the_lock():
     _use_tmp_lock()
     first = master_pi.acquire_lock()
     assert first is not None, "the first run did not get the lock"
+    metadata = json.loads(master_pi.LOCK_FILE.read_text())
+    assert metadata["pid"] > 0
+    assert metadata["started_at"]
     assert master_pi.acquire_lock() is None, "a second run started during the first"
+    assert json.loads(master_pi.LOCK_FILE.read_text()) == metadata, \
+        "the conflicting run erased the lock metadata"
     first.close()
 
 

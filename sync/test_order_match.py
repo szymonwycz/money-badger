@@ -191,6 +191,46 @@ def test_no_credentials_means_no_mailbox(monkeypatch):
     assert om.mailbox({}) is None
 
 
+def test_imap_socket_has_timeout_and_closes_after_timeout(monkeypatch):
+    instances = []
+
+    class FakeIMAP:
+        def __init__(self, host, port, timeout):
+            assert host == "imap.example.com"
+            assert port == 993
+            assert timeout == om.IMAP_TIMEOUT_SECONDS == 30
+            self.shutdown_calls = 0
+            self.logout_calls = 0
+            instances.append(self)
+
+        def login(self, _address, _password):
+            raise TimeoutError("read timed out")
+
+        def shutdown(self):
+            self.shutdown_calls += 1
+
+        def logout(self):
+            self.logout_calls += 1
+
+    monkeypatch.setattr(om.imaplib, "IMAP4_SSL", FakeIMAP)
+    mbox = {
+        "host": "imap.example.com",
+        "port": 993,
+        "address": "me@example.com",
+        "password": "secret",
+    }
+
+    try:
+        om.fetch_shop_emails(mbox, {"Allegro": {"folder": "Allegro"}})
+        raise AssertionError("TimeoutError was not propagated")
+    except TimeoutError:
+        pass
+
+    assert len(instances) == 1
+    assert instances[0].shutdown_calls == 1
+    assert instances[0].logout_calls == 0
+
+
 def test_allegro_is_parsed_not_sent_to_the_model(monkeypatch):
     monkeypatch.setattr(om.llm, "complete",
                         lambda *a, **kw: pytest_fail("the Allegro path must not call the model"))

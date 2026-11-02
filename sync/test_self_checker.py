@@ -53,6 +53,7 @@ def test_stale_fetch_flags_old_last_fetch():
     (root / ".bank_sync_state.json").write_text(json.dumps({"last_fetch": {"PL1111": old}}))
     findings = self_checker.check_stale_fetch(cfg)
     assert any("Checking" in f for f in findings), findings
+    assert any("checkpoint closed through" in f for f in findings), findings
 
     recent = date.today().isoformat()
     (root / ".bank_sync_state.json").write_text(json.dumps({"last_fetch": {"PL1111": recent}}))

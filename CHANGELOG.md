@@ -12,6 +12,11 @@ Notable changes to Money Badger. Dates are Europe/Warsaw.
   two-column grid on narrow screens.
 
 ### Fixed
+- **Hung optional email matching can no longer block later bank passes silently.**
+  IMAP operations and the order-matching subprocess are time-bounded, lock files
+  identify the active process and start time, and the watchdog alerts when a retry
+  finds a busy master or exits unsuccessfully. The systemd units provide a final
+  runtime backstop for both the sync and watchdog.
 - **One failed bank account no longer aborts the whole fetch.** Successful
   accounts are still processed and checkpointed, while the failed account and
   reason stay in the run summary. An immediate retry queries only accounts that

@@ -8,4 +8,5 @@ Type=oneshot
 User={{USER}}
 WorkingDirectory={{DIR}}
 EnvironmentFile={{DIR}}/.env
+TimeoutStartSec=30min
 ExecStart={{DIR}}/venv/bin/python3 {{DIR}}/master_pi.py

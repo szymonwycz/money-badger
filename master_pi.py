@@ -18,8 +18,10 @@ docs/CONFIGURATION.md#scheduling).
 """
 
 import argparse
+import datetime
 import fcntl
 import json
+import os
 import subprocess
 import sys
 import time
@@ -29,7 +31,7 @@ BASE_DIR      = Path(__file__).parent
 SYNC_SCRIPT   = BASE_DIR / "sync" / "main.py"
 SYNC_CFG      = BASE_DIR / "sync" / "config.json"
 PUSH_SCRIPT   = BASE_DIR / "push_actuals.py"
-ALLEGRO_SCRIPT = BASE_DIR / "sync" / "order_match.py"
+ORDER_MATCH_SCRIPT = BASE_DIR / "sync" / "order_match.py"
 
 import budget_client
 import env_file
@@ -41,6 +43,8 @@ from notify_telegram import send_telegram
 
 SUMMARY_FILE = BASE_DIR / ".last_fetch_summary.json"
 LOCK_FILE    = BASE_DIR / ".master_pi.lock"
+ORDER_MATCH_TIMEOUT_SECONDS = 300
+LOCK_CONFLICT_EXIT_CODE = 75
 
 
 def _get_checkme_count() -> str:
@@ -106,12 +110,21 @@ def acquire_lock():
     The lock lives on the process, so it guards a manual run started during an
     automatic one just as well.
     """
-    fh = open(LOCK_FILE, "w")
+    # Opening with "w" used to erase the real run's metadata before flock()
+    # reported the conflict. Keep the contents until this process owns the lock.
+    fh = open(LOCK_FILE, "a+")
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
         return None
+    fh.seek(0)
+    fh.truncate()
+    json.dump({
+        "pid": os.getpid(),
+        "started_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    }, fh)
+    fh.flush()
     return fh
 
 
@@ -165,6 +178,10 @@ def run_fetch(dry_run: bool = False) -> bool:
         cmd.append("--dry-run")
 
     previous_summary_version = _summary_version()
+    # Deliberately no parent timeout here. fetch downloads every requested
+    # account before committing checkpoints one by one; killing it between those
+    # phases can force another bank request for data already downloaded. The
+    # systemd unit timeout is the outer safety net without an in-process retry.
     result = subprocess.run(cmd, cwd=str(SYNC_SCRIPT.parent))
     if result.returncode != 0:
         fresh_failed_summary = _fresh_failed_summary(previous_summary_version)
@@ -248,15 +265,26 @@ def run_push_actuals():
     subprocess.run([sys.executable, str(PUSH_SCRIPT)], cwd=str(BASE_DIR))
 
 
-def run_allegro_match():
+def run_order_match() -> bool | None:
     """Step 4: match order confirmation emails against CHECK ME transactions.
 
     Does nothing when no mailbox is configured (see sync/order_match.py), like
     every other optional step — it never blocks the rest of the pipeline.
     """
-    if not ALLEGRO_SCRIPT.exists():
-        return
-    subprocess.run([sys.executable, str(ALLEGRO_SCRIPT)], cwd=str(SYNC_SCRIPT.parent))
+    if not ORDER_MATCH_SCRIPT.exists():
+        return None
+    try:
+        result = subprocess.run(
+            [sys.executable, str(ORDER_MATCH_SCRIPT)],
+            cwd=str(SYNC_SCRIPT.parent),
+            timeout=ORDER_MATCH_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"  [orders] timed out after {ORDER_MATCH_TIMEOUT_SECONDS}s; stopping the optional step.")
+        return False
+    if result.returncode != 0:
+        print(f"  [orders] subprocess exited with status {result.returncode}.")
+    return True
 
 
 def main():
@@ -267,7 +295,6 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="fetch without writing CSVs and without pushing")
     args = parser.parse_args()
 
-    import datetime
     print(f"=== Money Badger sync (Pi) — {datetime.date.today().isoformat()} ===\n")
 
     print("=== Step 0: Enable Banking fetch ===\n")
@@ -287,7 +314,7 @@ def main():
     print()
 
     print("=== Step 4: Match orders from email ===\n")
-    run_allegro_match()
+    order_match_ok = run_order_match()
 
     try:
         summary = json.loads(SUMMARY_FILE.read_text()) if SUMMARY_FILE.exists() else {}
@@ -317,6 +344,8 @@ def main():
 
     if fetch_ok:
         mark_success("master_pi", BASE_DIR)
+        if order_match_ok is False:
+            send_telegram("bank sync OK, order matching timed out")
         if not _should_notify(summary, today_str):
             print("\nNothing new — skipping the Telegram notification.")
             return
@@ -356,10 +385,10 @@ def main():
 
 
 if __name__ == "__main__":
-    # Before start_logging(), so a refused second run leaves no trace in the log
-    # and exits 0 — the watchdog must not be reported as failed for standing down.
+    # Before start_logging(), so a refused second run leaves no trace in its own
+    # log. Exit 75 lets the watchdog distinguish a busy/stuck master from success.
     _lock = acquire_lock()
     if _lock is None:
         print("master_pi.py is already running — exiting without a second pass.")
-        sys.exit(0)
+        sys.exit(LOCK_CONFLICT_EXIT_CODE)
     main()
