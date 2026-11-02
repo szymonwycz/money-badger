@@ -10,6 +10,7 @@ late pass after an earlier pass succeeded. That pass's rows remain reachable
 through the next day's overlapping fetch window. Fetch and push are idempotent,
 deduplicating on hash/eb_id.
 """
+import json
 import subprocess
 import sys
 from datetime import datetime
@@ -22,8 +23,19 @@ import env_file
 env_file.load()
 
 from logging_setup import start_logging
+from notify_telegram import send_telegram
 
 MARKER = BASE_DIR / "logs" / f".success_master_pi_{datetime.now():%Y-%m-%d}"
+LOCK_FILE = BASE_DIR / ".master_pi.lock"
+LOCK_CONFLICT_EXIT_CODE = 75
+
+
+def _lock_start() -> str:
+    try:
+        metadata = json.loads(LOCK_FILE.read_text())
+        return metadata.get("started_at") or "an unknown time"
+    except (OSError, json.JSONDecodeError):
+        return "an unknown time"
 
 
 def main():
@@ -35,7 +47,15 @@ def main():
         return
 
     print(f"No {MARKER.name} — today's run did not finish. Running master_pi.py again...\n")
-    subprocess.run([sys.executable, str(BASE_DIR / "master_pi.py")])
+    result = subprocess.run([sys.executable, str(BASE_DIR / "master_pi.py")])
+    if result.returncode == LOCK_CONFLICT_EXIT_CODE:
+        message = f"Money Badger watchdog: master_pi has been running since {_lock_start()}"
+        print(message)
+        send_telegram(message)
+    elif result.returncode != 0:
+        message = f"Money Badger watchdog: master_pi exited with status {result.returncode}"
+        print(message)
+        send_telegram(message)
 
 
 if __name__ == "__main__":
